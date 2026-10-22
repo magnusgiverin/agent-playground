@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "notion-api": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "set -a && . ./.env && set +a && OPENAPI_MCP_HEADERS=\"{\\\"Authorization\\\":\\\"Bearer $NOTION_API_KEY\\\",\\\"Notion-Version\\\":\\\"2025-09-03\\\"}\" exec npx -y @notionhq/notion-mcp-server@2.5.2"
+      ]
+    }
+  }
+}

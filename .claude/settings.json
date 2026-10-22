@@ -1,0 +1,58 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill",
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(git clone --depth 1 --single-branch --branch * .cache/code/*)",
+      "Bash(git -C .cache/code/* fetch --depth 1 origin *)",
+      "Bash(git -C .cache/code/* reset --hard FETCH_HEAD)",
+      "Bash(git -C .cache/code/* log -1 *)",
+      "mcp__claude_ai_Notion__notion-fetch",
+      "mcp__claude_ai_Notion__notion-search",
+      "mcp__claude_ai_Notion__notion-query-data-sources",
+      "mcp__claude_ai_Notion__notion-get-comments",
+      "mcp__claude_ai_Notion__notion-get-self",
+      "mcp__claude_ai_Notion__notion-get-users",
+      "mcp__notion-api__API-retrieve-a-page",
+      "mcp__notion-api__API-retrieve-page-markdown",
+      "mcp__notion-api__API-patch-page",
+      "mcp__notion-api__API-post-page",
+      "mcp__notion-api__API-update-page-markdown",
+      "mcp__notion-api__API-create-a-comment",
+      "mcp__notion-api__API-retrieve-a-comment",
+      "mcp__notion-api__API-query-data-source",
+      "mcp__notion-api__API-retrieve-a-data-source",
+      "mcp__notion-api__API-get-users",
+      "mcp__notion-api__API-get-self",
+      "mcp__claude_ai_Figma__get_metadata",
+      "mcp__claude_ai_Figma__get_screenshot",
+      "mcp__claude_ai_Figma__get_figjam",
+      "mcp__claude_ai_Figma__whoami"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "mcp__notion-api__API-update-a-data-source",
+      "mcp__notion-api__API-create-a-data-source",
+      "mcp__notion-api__API-delete-a-block",
+      "mcp__notion-api__API-move-page",
+      "mcp__notion-api__API-update-a-block",
+      "mcp__claude_ai_Figma__use_figma",
+      "mcp__claude_ai_Figma__create_new_file",
+      "mcp__claude_ai_Figma__upload_assets",
+      "mcp__claude_ai_Figma__generate_image",
+      "mcp__claude_ai_Figma__html_to_figma",
+      "mcp__claude_ai_Figma__send_code_to_figma",
+      "mcp__claude_ai_Figma__add_code_connect_map",
+      "mcp__claude_ai_Figma__send_code_connect_mappings",
+      "Bash(git * push*)",
+      "Bash(git * commit*)",
+      "Bash(git * remote*)",
+      "Bash(git * config*)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "notion-api"
+  ]
+}

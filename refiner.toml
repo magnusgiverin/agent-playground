@@ -1,0 +1,20 @@
+# Oppsett av raffineringsagenten. Ingenting her er hemmelig, så det kan committes.
+# Den eneste hemmeligheten, Notion API-nøkkelen, ligger i .env.
+
+[notion]
+# Notion-siden som har oppgaveboardet
+board = "https://app.notion.com/p/4006bd3085418018ae5ad454d93b7159"
+
+[code]
+# Produktets kode. /sync-code holder en skrivebeskyttet kopi av repoet oppdatert i
+# .cache/code med din egen git-innlogging, så det trengs ingen GitHub-nøkkel eller MCP-server.
+github = "https://github.com/msoyland/hellas-grill"
+branch = "main"
+# Eller les en lokal mappe i stedet (kommenter ut github over):
+# local = "../hellas-grill"
+
+[design]
+# Produktets hovedfil eller -side i Figma. Lenker i oppgavene går først. Har en oppgave
+# ingen lenke, blar agenten i denne fila etter frames som passer. Leses via claude.ai-
+# koblingen til Figma.
+figma = ""
