@@ -5,7 +5,7 @@ Seksjonen står alltid helt nederst på siden, under forfatterens originaltekst,
 ```markdown
 ---
 ## 🤖 Raffinering
-> Vedlikeholdes av raffineringsagenten. Teksten din over endres aldri. Svar på spørsmålene i kommentarene, eller kommenter en linje under for å rette den.
+> Vedlikeholdes av raffineringsagenten. Teksten din over endres aldri. Svar på spørsmålene i kommentarfeltet nederst på siden, så plukker agenten dem opp med en gang.
 
 **Eier (låst):** <mention-user url="user://…"/>
 

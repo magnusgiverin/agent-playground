@@ -68,7 +68,7 @@ Flere linjer i én kommentar lager du med `\n` inne i `content`. Én kommentar p
 | Figma-frame | `<embed source="https://www.figma.com/…?node-id=…">bildetekst</embed>` | |
 | Gjennomstreking | ikke bruk | `~~tekst~~`, som blir `\~\~` ved neste skriving |
 
-Er du i tvil, leser du siden med `API-retrieve-page-markdown` og kopierer syntaksen derfra. Etter en skriving leser du den igjen og retter det med en gang hvis noe ble lagret som bokstavelig tekst.
+Hent ikke `notion://docs/notion-flavored-markdown-spec`. Det som trengs, står her. Er du i tvil, leser du siden med `API-retrieve-page-markdown` og kopierer syntaksen derfra. Etter en skriving leser du den igjen og retter det med en gang hvis noe ble lagret som bokstavelig tekst.
 
 ## Lag en oppgave
 
@@ -85,7 +85,7 @@ Er du i tvil, leser du siden med `API-retrieve-page-markdown` og kopierer syntak
 
 ## Verifiser
 
-Etter at du har skrevet, `notion-fetch`-er du oppgaven og sjekker:
+Bruk svarene du allerede har fått: `API-patch-page` returnerer egenskapene, og `API-update-page-markdown` returnerer innholdet. Hent ikke siden på nytt bare for å sjekke. Sjekk:
 
 - at egenskapene har verdiene du satte
 - at Raffinering-seksjonen står slik du skrev den

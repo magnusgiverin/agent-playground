@@ -7,7 +7,7 @@ Raffineringsagenten leser produktets kode og design, og endrer aldri noen av dem
 Skillen [sync-code](.claude/skills/sync-code/SKILL.md) holder en lokal kopi oppdatert før hver runde: en grunn klone av GitHub-repoet i `.cache/code/<reponavn>`, laget med brukerens egen git-innlogging, eller den lokale mappa (`local`). Du får den som `code=<mappe>`, og i tillegg `github=<repo-url>@<branch>` når den kom fra GitHub.
 
 - Søk **bare** med verktøyene Glob og Grep, og sett alltid `path` til kodemappa (for eksempel `path: ".cache/code/hellas-grill"`). `.cache/` er gitignored i dette prosjektet, så et søk uten `path` finner ingenting i koden. Bruk aldri Bash til å lete i koden (`ls`, `grep`, `cat`, `sed`). Bash er bare tillatt for git-kommandoene i sync-code, og alt annet blir avvist.
-- List mapper med Glob (`pattern: "**/*"`, eller `src/*` for én mappe). Read virker bare på filer, ikke på mapper. Store filer leser du i biter med `offset` og `limit`, gjerne etter at Grep har funnet linjenumrene.
+- List mapper med Glob (`pattern: "**/*"`, eller `src/*` for én mappe). Read virker bare på filer, ikke på mapper. Les aldri en hel fil på over 300 linjer. Finn linjenumrene med Grep (`-n`) først, og les så bare bitene du trenger med `offset` og `limit`. Hele filer koster mye, fordi de blir med i hvert steg etterpå.
 - Start med README, CLAUDE.md eller AGENTS.md og mappestrukturen for å forstå hvordan prosjektet er bygd opp.
 - Finn filene oppgaven berører, sjekk om noe lignende finnes allerede, og bekreft de faktiske navnene (komponenter, ruter, endepunkter, felter, tekster).
 - List bare stier du faktisk har åpnet. Skriv dem relativt til roten av repoet. Er `github=` oppgitt, lenker du hver av dem som `<repo-url>/blob/<branch>/<sti>`.

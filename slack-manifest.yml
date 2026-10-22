@@ -1,0 +1,34 @@
+# Lim inn dette på https://api.slack.com/apps → Create New App → From an app manifest
+display_information:
+  name: Raffineringsagent
+  description: Gjør grove oppgaver om til entydige spesifikasjoner, sammen med deg i en tråd.
+features:
+  bot_user:
+    display_name: Raffineringsagent
+    always_online: true
+  slash_commands:
+    - command: /new
+      description: Lag en ny oppgave og få spørsmålene her i en tråd
+      usage_hint: "Vis åpningstidene i footeren på mobil"
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - commands            # /new
+      - chat:write          # rotmeldingen og alt i tråden
+      - channels:history    # lese svar i tråder, hvis kanalen er offentlig
+      - groups:history      # lese svar i tråder, hvis kanalen er privat
+      - users:read          # navnet til den som svarer
+      - users:read.email    # finne riktig Eier i Notion ut fra e-post
+      - reactions:write     # ✅ på svar som er lagret i Notion
+      - files:write         # Figma-bilder i tråden (med FIGMA_TOKEN)
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - message.groups
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

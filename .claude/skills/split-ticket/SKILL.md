@@ -30,7 +30,7 @@ Sikt på 2 til 6 deler. Sett dem i byggerekkefølge. En del som trenger en annen
 
 Lag hver del på boardet slik [notion-write](../notion-write/SKILL.md) beskriver («Lag en oppgave»):
 
-- **Egenskaper**: `Oppgave` (en kort tittel i imperativ, på norsk), `Status` = `Raffinering`, `Klar for pipeline` huket av, `Eier` = originalens låste eier, `Prioritet` kopiert fra originalen, `Etiketter` fra de eksisterende valgene, og `Figma-lenke` hvis en frame hører til denne delen.
+- **Egenskaper**: `Oppgave` (en kort tittel i imperativ, på norsk), `Status` = `Innboks`, `Klar for pipeline` huket av, `Eier` = originalens låste eier, `Prioritet` kopiert fra originalen, `Etiketter` fra de eksisterende valgene, og `Figma-lenke` hvis en frame hører til denne delen.
 - **Innhold**: bare dette hodet, som regnes som den nye oppgavens originaltekst:
 
   ```markdown
@@ -48,7 +48,7 @@ Lag hver del på boardet slik [notion-write](../notion-write/SKILL.md) beskriver
 
   Boardets mal skal ikke brukes.
 
-Når alle delene finnes, setter du `Blokkert av` på hver ny oppgave til delene den avhenger av. Post så låsekommentaren på hver ny oppgave: `🤖 Pipeline startet. Eier: <mention-user>. Eieren svarer på spørsmål og er låst til oppgaven er ferdig.`, så eierlåsen gjelder for delene også.
+Når alle delene finnes, setter du `Blokkert av` på hver ny oppgave til delene den avhenger av. Ikke post låsekommentaren på delene. Den poster hver dels egen økt når den tar delen (refine-ticket steg 0).
 
 ## 5. Oppdater originalen
 
@@ -58,8 +58,8 @@ Gjør disse endringene via notion-write. Originalen blir en paraplyoppgave som e
 - Egenskaper: `Blokkert av` = alle delene, `Blokkeringsnotat` = `Delt opp i N oppgaver. Flyttes til Klar når alle er Klar.`, `Status` = `Raffinering`. Behold størrelsen L eller XL. Fjern `more information needed` med mindre originalen fortsatt har åpne spørsmål.
 - Kommenter `🤖 Denne var for stor for én oppgave, så jeg har delt den opp i N deler: <mentions>. Kommenter her hvis oppdelingen er feil.` og nevn eieren.
 
-## 6. Raffiner delene
+## 6. Ikke raffiner delene selv
 
-Kjør `/refine-ticket` på hver ny oppgave, i byggerekkefølge, og send kodeargumentene videre. Hver av dem stiller sine egne spørsmål i sine egne kommentarer.
+Delene står i Innboks med `Klar for pipeline` huket av og samme eier. `refine.py` starter en egen økt for hver del, og den økta får med seg konteksten din (Figma, kode og Notion), fordi den forkes fra denne økta. Kjøres det uten refine.py, plukker neste `/refine-board` dem opp. Avslutt denne økta etter steg 5. Paraplyen blir stående i Raffinering til alle delene er Klar, og da blir denne økta fortsatt for å avslutte den.
 
 Skriv én linje per oppgave du laget eller oppdaterte: tittelen, statusen og lenken.

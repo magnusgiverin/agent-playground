@@ -1,6 +1,6 @@
 ---
 name: refine-board
-description: Én runde med raffineringsagenten over Notion-boardet. Slipper inn oppgaver med «Klar for pipeline» huket av og nøyaktig én Eier, låser eieren, holder Raffinering og Klar skrivebeskyttet for folk, raffinerer nye og besvarte oppgaver med /refine-ticket, og flytter oppdelte paraplyoppgaver til Klar når delene er det. Kjør den ofte (/loop 2m /refine-board, eller python3 refine.py --watch), så eieren kan svare i Notion-kommentarer og oppgaven blir bedre til den er entydig.
+description: Én runde over hele Notion-boardet, for bruk interaktivt (refine.py følger hver oppgave i sin egen økt i stedet). Slipper inn oppgaver med «Klar for pipeline» huket av og nøyaktig én Eier, låser eieren, holder Raffinering og Klar skrivebeskyttet for folk, raffinerer nye og besvarte oppgaver med /refine-ticket, og flytter oppdelte paraplyoppgaver til Klar når delene er det. Kjør den når du vil ta en manuell runde, eller med /loop 2m /refine-board. Vanligvis kjører du python3 refine.py i stedet.
 ---
 
 # Raffiner boardet
@@ -52,13 +52,13 @@ Spør i rows-modus, eldste først, med `Klar for pipeline` huket av. I Innboks o
 For hver ny oppgave sjekker du `Eier` først:
 
 - **Tom, eller mer enn én person**: fjern haken i `Klar for pipeline`. Post `🤖 Oppgaven trenger nøyaktig én Eier før den kan gå inn i pipelinen. Sett Eier, og huk av Klar for pipeline igjen.` og nevn den som opprettet siden. Hopp over oppgaven. Siden haken er borte, poster ikke neste runde dette på nytt.
-- **Nøyaktig én person**: sett `Status` til Raffinering. Da er oppgaven din, og en parallell runde hopper over den. Post så låsekommentaren: `🤖 Pipeline startet. Eier: <mention-user>. Eieren svarer på spørsmål og er låst til oppgaven er ferdig.`
+- **Nøyaktig én person**: kjør `/refine-ticket` med oppgavens URL i steg 5. Den tar oppgaven selv (setter Raffinering og poster låsekommentaren, se refine-ticket steg 0).
 
 ## 5. Raffiner
 
 Ta høyst så mange som «Oppgaver per runde» i board.md: først de besvarte, så de nye du slapp inn, så de fastlåste, eldste først i hver gruppe. For hver oppgave:
 
-1. Sett `Status` til Raffinering, hvis den ikke allerede er det.
+1. For besvarte oppgaver setter du `Status` til Raffinering. Nye oppgaver tar refine-ticket selv.
 2. Kjør `/refine-ticket` med oppgavens URL og kodeargumentene. Hopp over oppgaver du ikke fikk tatt.
 3. Feiler noe, poster du `🤖 Raffineringen feilet: <kort grunn>. Jeg prøver igjen i neste runde.` og lar statusen stå på Raffinering, så neste runde plukker den opp som fastlåst.
 

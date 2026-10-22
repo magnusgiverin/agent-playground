@@ -1,6 +1,12 @@
 # Oppsett av raffineringsagenten. Ingenting her er hemmelig, så det kan committes.
 # Den eneste hemmeligheten, Notion API-nøkkelen, ligger i .env.
 
+[agent]
+# Modell og innsats for økta. Sonnet holder til raffinering og koster mye mindre enn Opus.
+# Bytt til "claude-opus-5-5" eller effort = "high" hvis spesifikasjonene blir for tynne.
+model = "claude-sonnet-5-5"
+effort = "medium"
+
 [notion]
 # Notion-siden som har oppgaveboardet
 board = "https://app.notion.com/p/4006bd3085418018ae5ad454d93b7159"
@@ -18,3 +24,12 @@ branch = "main"
 # ingen lenke, blar agenten i denne fila etter frames som passer. Leses via claude.ai-
 # koblingen til Figma.
 figma = ""
+
+[slack]
+# Kanal-ID-en (for eksempel "C0123ABC") til den ene kanalen Slack-broen bruker. /new virker bare
+# der, og alle oppgaver får sin tråd der, også de som lages direkte i Notion. Påkrevd for Slack.
+# Finn ID-en nederst i kanalens detaljer i Slack, og inviter boten: /invite @Raffineringsagent
+# Bare for testing: alle oppgaver fra /new får denne Notion-brukeren som Eier, uansett hvem
+# som skriver kommandoen. Tøm den (test_owner = "") for å finne eieren ut fra e-post i stedet.
+test_owner = "3acd872b-594c-8185-9655-0002880a6432"  # magnus.giverin@bekk.no
+channel = "C0CBAJUQFGR"
