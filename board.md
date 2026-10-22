@@ -35,9 +35,10 @@ Innstillingene ligger i [refiner.toml](refiner.toml): boardsiden (`[notion] boar
 | Ny, ikke rørt av agenten | Innboks (eller tom status) | ja |
 | Agenten jobber med den | Raffinering | nei, bare kommentarer |
 | Venter på at eieren svarer på spørsmål | Trenger avklaring | ja |
-| Entydig og klar til å bygges | Klar | nei, bare kommentarer (å flytte den til Under utvikling er lov) |
+| Entydig og klar til å bygges. Utviklingsagenten tar den automatisk | Klar | nei, bare kommentarer |
+| Utviklingsagenten bygger den på en egen branch | Under utvikling | nei, bare kommentarer (svar på spørsmål der) |
 
-Statusene etter Klar (Under utvikling, Til gjennomgang, Fullført) er utenfor agentens ansvar. Der gjelder bare eierlåsen.
+Raffineringsagenten eier Raffinering og Klar. Utviklingsagenten (/develop-ticket) eier Under utvikling. Når den er ferdig og alle sjekkene er grønne, fører refine.py oppgavens branch rett inn i main (ingen PR), setter Fullført og legger lenken til commiten i `Pull request`. Til gjennomgang brukes ikke. Eierlåsen gjelder hele veien.
 
 Tagg for oppgaver som venter på svar: `more information needed`.
 

@@ -6,6 +6,13 @@
 # Bytt til "claude-opus-5-5" eller effort = "high" hvis spesifikasjonene blir for tynne.
 model = "claude-sonnet-5-5"
 effort = "medium"
+# Modell for utviklingsøktene (fra Klar til PR). Står den tom, brukes model over.
+dev_model = "claude-sonnet-5-5"
+# Hvor mange agenter som kan jobbe samtidig, på hver sin oppgave. Høyere går fortere, men koster
+# mer per minutt og gir flere samtidige kall mot Notion (som har en grense på ca. 3 kall i sekundet).
+parallel = 3
+# Nettilgang (WebSearch og WebFetch) for agentene, til dokumentasjon, API-er og pakker. false skrur det av.
+web = true
 
 [notion]
 # Notion-siden som har oppgaveboardet
@@ -14,7 +21,7 @@ board = "https://app.notion.com/p/4006bd3085418018ae5ad454d93b7159"
 [code]
 # Produktets kode. /sync-code holder en skrivebeskyttet kopi av repoet oppdatert i
 # .cache/code med din egen git-innlogging, så det trengs ingen GitHub-nøkkel eller MCP-server.
-github = "https://github.com/msoyland/hellas-grill"
+github = "https://github.com/magnusgiverin/agentic-development-test"
 branch = "main"
 # Eller les en lokal mappe i stedet (kommenter ut github over):
 # local = "../hellas-grill"
@@ -23,7 +30,10 @@ branch = "main"
 # Produktets hovedfil eller -side i Figma. Lenker i oppgavene går først. Har en oppgave
 # ingen lenke, blar agenten i denne fila etter frames som passer. Leses via claude.ai-
 # koblingen til Figma.
-figma = ""
+figma = "https://www.figma.com/design/LC06usO0N9ckIfvwk3V7xc/Agentic-Figma-test"
+# Ved visuelle endringer tegner agenten en skisse på siden «🤖 Skisser» i fila over, og eieren må
+# godkjenne den før oppgaven blir Klar. Krever at Figma-kontoen din kan redigere fila.
+sketches = true
 
 [slack]
 # Kanal-ID-en (for eksempel "C0123ABC") til den ene kanalen Slack-broen bruker. /new virker bare

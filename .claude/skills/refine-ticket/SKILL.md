@@ -58,6 +58,12 @@ Fyll ut alle delene i [page-layout.md](page-layout.md) mot definisjonen av klar.
 
 Hvert spørsmål går inn under `Åpne spørsmål` med en ID (`S1`, `S2` og så videre), og nummereringen fortsetter fra tidligere runder. Skriv hvert spørsmål så forfatteren kan svare på én linje, og si hva du antar hvis de ikke svarer.
 
+### 3b. Skisse ved visuelle endringer
+
+Endrer oppgaven noe brukeren ser (layout, komponenter, farger, tekster i UI), og det ikke finnes et godkjent design, kjører du `/sketch-figma` før du skriver seksjonen. Den tegner en skisse i Figma og gir deg en embed og et godkjenningsspørsmål. Skissen må være godkjent av eieren før oppgaven kan bli Klar. Er den ikke godkjent ennå, blir oppgaven stående i Trenger avklaring, også når alle andre spørsmål er besvart. Når eieren svarer på skissen, er det `/sketch-figma` steg 5 som gjelder.
+
+Står `sketches = false` under `[design]` i refiner.toml, hopper du over dette steget og krever en lenket Figma-frame i stedet, slik definisjonen av klar sier.
+
 ### 4. Raffinering-seksjonen
 
 Steg 4 til 6 bestemmer hva som skal skrives, og steg 7 skriver det, alt via [notion-write](../notion-write/SKILL.md).

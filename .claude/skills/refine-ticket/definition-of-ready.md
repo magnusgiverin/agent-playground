@@ -5,7 +5,7 @@ En oppgave er **Klar** bare når alt dette stemmer:
 1. **Problem**: sier hva som trengs og **hvorfor**, sett fra brukeren. Hvordan kan du finne ut av selv, men ikke hvorfor. Mangler hvorfor, så spør.
 2. **Akseptansekriterier**: 3 til 7 korte utsagn. En test eller en reviewer må kunne sjekke hvert av dem.
 3. **Omfang**: filene eller modulene som sannsynligvis berøres, funnet ved å søke i koden. List bare stier du faktisk har sett.
-4. **Design**: UI-arbeid lenker til konkrete Figma-frames med `node-id`, og sier hvilke tilstander som ikke er designet (lasting, tom, feil, responsiv, …). Har UI-arbeid ingen Figma-frame, spør etter en. Beskriv aldri et design du har funnet på selv. Arbeid uten UI skriver `(ingen)`.
+4. **Design**: UI-arbeid har enten en skisse som eieren har **godkjent** (laget med /sketch-figma, merket «godkjent» under Design), eller en Figma-frame med `node-id` som eieren har sagt er designet som skal bygges. Design-delen sier også hvilke tilstander som ikke er designet (lasting, tom, feil, responsiv, …). En skisse som venter på godkjenning, er ikke nok. Beskriv aldri et design du har funnet på selv uten å tegne det. Arbeid uten UI skriver `(ingen)`.
 5. **Utenfor omfang**: hva oppgaven bevisst ikke gjør.
 6. **Størrelse**: XS (en liten, godt forstått endring), S (under en dag) eller M (en til tre dager). L og XL er aldri klare, så del dem opp.
 7. **Én endring**: oppgaven kan bygges, reviewes og leveres alene, med få antakelser.

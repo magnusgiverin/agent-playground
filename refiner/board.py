@@ -10,11 +10,11 @@ import uuid
 from .config import CONFIG, env
 
 INBOX = {"Innboks", None}  # tom status regnes som Innboks
-DONE = {"Klar", "Under utvikling", "Til gjennomgang", "Fullført"}  # Klar eller lenger
+DONE = {"Klar", "Under utvikling", "Til gjennomgang", "Fullført"}  # Klar eller lenger (Til gjennomgang brukes ikke lenger, men tåles)
 NETWORK_ERRORS = (urllib.error.URLError, TimeoutError, KeyError, ValueError)
 REQUIRED_PROPERTIES = ["Oppgave", "Status", "Etiketter", "Størrelse", "Figma-lenke", "Blokkeringsnotat",
-                       "Blokkert av", "Blokkerer", "Klar for pipeline", "Eier"]
-REQUIRED_STATUSES = ["Innboks", "Raffinering", "Trenger avklaring", "Klar"]
+                       "Blokkert av", "Blokkerer", "Klar for pipeline", "Eier", "Pull request"]
+REQUIRED_STATUSES = ["Innboks", "Raffinering", "Trenger avklaring", "Klar", "Under utvikling", "Fullført"]
 
 
 class Board:
@@ -74,6 +74,8 @@ class Board:
                 "tags": sorted(o["name"] for o in props["Etiketter"]["multi_select"]),
                 "size": (props["Størrelse"]["select"] or {}).get("name"),
                 "figma": props["Figma-lenke"]["url"],
+                "blocker": "".join(t["plain_text"] for t in props["Blokkeringsnotat"]["rich_text"]),
+                "pr": props["Pull request"]["url"],
                 # bare endringer gjort av et menneske, ikke av agenten
                 "edited": page["last_edited_time"] if page["last_edited_by"]["id"] != self.bot else None,
                 "comment": None,   # ID-en til siste kommentar fra et menneske
@@ -97,6 +99,17 @@ class Board:
             comments.append({"id": comment["id"], "author": author, "text": text,
                              "human": not from_agent and not text.startswith("🤖")})
         return comments
+
+    def inline_comments(self, page_id):
+        """Menneskers kommentarer på enkeltlinjer i siden. API-et gir dem bare blokk for blokk, så dette er
+        mange kall og brukes sjelden (se InlineWatcher)."""
+        found = []
+        for block in self.pages(f"blocks/{page_id}/children?page_size=100"):
+            for comment in self.pages(f"comments?block_id={block['id']}&page_size=100"):
+                text = "".join(t.get("plain_text", "") for t in comment["rich_text"])
+                if (comment["created_by"]["id"] != self.bot or text.startswith("💬")) and not text.startswith("🤖"):
+                    found.append((comment["id"], text))
+        return found
 
     def human_comments(self, page_id):
         return [(c["id"], c["text"]) for c in self.comments(page_id) if c["human"]]
@@ -138,6 +151,9 @@ class Board:
         })
         return page["id"], page["url"]
 
+    def update(self, page_id, properties):
+        self.api("PATCH", f"pages/{page_id}", {"properties": properties})
+
     def comment(self, page_id, text):
         self.api("POST", "comments", {"parent": {"page_id": page_id}, "rich_text": [{"text": {"content": text[:2000]}}]})
 
@@ -166,3 +182,29 @@ class Board:
             {"text": {"content": "🤖 Oppgaven trenger nøyaktig én Eier før den kan gå inn i pipelinen. "
                                  "Sett Eier, og huk av Klar for pipeline igjen. "}},
             {"type": "mention", "mention": {"user": {"id": ticket["creator"]}}}]})
+
+
+class InlineWatcher:
+    """Ser etter linjekommentarer på oppgaver som venter på svar, hvert 10. minutt, i en egen tråd.
+    Den billige sjekken i hovedløkka ser bare sidekommentarer."""
+
+    def __init__(self, board, every=600):
+        import threading
+        self.board, self.every = board, every
+        self.waiting = set()    # oppgaver som venter på svar; settes av hovedløkka
+        self.found = {}         # oppgave-ID → [(kommentar-ID, tekst)] for linjekommentarer
+        self.wake = threading.Event()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        import time
+        while True:
+            time.sleep(self.every)
+            for page_id in list(self.waiting):
+                try:
+                    comments = self.board.inline_comments(page_id)
+                except NETWORK_ERRORS:
+                    continue
+                if comments and comments != self.found.get(page_id):
+                    self.found[page_id] = comments
+                    self.wake.set()

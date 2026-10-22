@@ -60,7 +60,7 @@ Ta høyst så mange som «Oppgaver per runde» i board.md: først de besvarte, s
 
 1. For besvarte oppgaver setter du `Status` til Raffinering. Nye oppgaver tar refine-ticket selv.
 2. Kjør `/refine-ticket` med oppgavens URL og kodeargumentene. Hopp over oppgaver du ikke fikk tatt.
-3. Feiler noe, poster du `🤖 Raffineringen feilet: <kort grunn>. Jeg prøver igjen i neste runde.` og lar statusen stå på Raffinering, så neste runde plukker den opp som fastlåst.
+3. Feiler noe, poster du `🤖 Raffineringen feilet: <kort grunn>. Jeg prøver igjen om litt.` og lar statusen stå på Raffinering, så den blir plukket opp som fastlåst (i refine.py etter 1, 5 og 15 minutter, interaktivt etter en time).
 
 ## 6. Rapport
 

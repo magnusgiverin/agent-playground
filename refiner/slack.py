@@ -17,16 +17,16 @@ import threading
 import urllib.parse
 import urllib.request
 
-from .board import DONE, NETWORK_ERRORS
+from .board import DONE, INBOX, NETWORK_ERRORS
 from .config import SLACK, env
+from .display import say
 
 STATUS_MESSAGES = {
     "Raffinering": "🔍 Agenten raffinerer oppgaven nå.",
     "Trenger avklaring": "❓ Agenten trenger svar på spørsmålene over. Svar her i tråden, så går svaret rett til oppgaven.",
-    "Klar": "✅ Da er oppgaven klar til utvikling. En annen agent plukker den opp snarest.",
-    "Under utvikling": "🚧 Oppgaven er under utvikling.",
-    "Til gjennomgang": "👀 Oppgaven er til gjennomgang.",
-    "Fullført": "🎉 Oppgaven er fullført.",
+    "Klar": "✅ Da er oppgaven klar til utvikling. Utviklingsagenten plukker den opp snarest.",
+    "Under utvikling": "🚧 Utviklingsagenten bygger oppgaven nå, på en egen branch.",
+    "Fullført": "🎉 Ferdig! Branchen er ført inn i main. Lenken til commiten står over.",
 }
 QUESTION = re.compile(r"\bS\d+:")  # agentens spørsmål («🤖 S4: …»), så eieren nevnes
 FIGMA_EMBED = re.compile(r'<embed source="(https://www\.figma\.com/[^"]+)">([^<]*)</embed>')
@@ -106,15 +106,24 @@ class Slack:
             page_id, link = self.links.get()
             state.setdefault(page_id, {"title": snap.get(page_id, {}).get("title", "")})["slack"] = {**link, "posted": [], "status": None}
             changed = True
-        for id, entry in state.items():
-            ticket = snap.get(id)
-            if not ticket:
-                continue
-            if not entry.get("slack") and entry.get("session") and ticket["status"] not in DONE:
-                self.open_thread(id, entry, ticket)
-                changed = True
+        for id, ticket in snap.items():
+            entry = state.get(id, {})
+            # tråden lages så snart oppgaven er i pipelinen, før agenten starter, så ingenting går tapt
+            entering = ticket["ready"] and ticket["status"] in INBOX and len(ticket["owners"]) == 1
+            if not entry.get("slack") and (entry.get("session") or entering) and ticket["status"] not in DONE:
+                entry = state.setdefault(id, {"title": ticket["title"]})
+                try:
+                    self.open_thread(id, entry, ticket)
+                    changed = True
+                except Exception as error:
+                    say(f"Slack: fikk ikke laget tråd for «{ticket['title']}»: {error}")
+                    continue
             if entry.get("slack"):
-                changed |= self.mirror(id, entry["slack"], ticket)
+                try:
+                    changed |= self.mirror(id, entry["slack"], ticket)
+                except Exception as error:  # prøv igjen neste runde; det som ikke ble sendt, er ikke merket som sendt
+                    say(f"Slack: fikk ikke speilet «{ticket['title']}»: {error}")
+                    changed = True
         return changed
 
     def open_thread(self, id, entry, ticket):
@@ -123,28 +132,34 @@ class Slack:
         who = f"<@{owner}>" if owner else self.board.person(ticket["owners"][0])["name"] if ticket["owners"] else "ingen"
         root = self.post_to(CHANNEL, None, f"🆕 *{ticket['title']}*\n<{ticket['url']}|Åpne i Notion> · eier {who}\n"
                                                     "Jeg legger spørsmål og status her i tråden. Svar her, så går svaret rett til oppgaven.")
-        # det som allerede står på oppgaven, er ikke nytt for tråden
-        entry["slack"] = {"channel": CHANNEL, "ts": root["ts"], "user": owner,
-                          "posted": [c["id"] for c in ticket["all_comments"]], "status": None}
+        # bare menneskers kommentarer fra før agenten tok oppgaven, regnes som sett; alt agenten har skrevet, postes
+        before_agent = []
+        for c in ticket["all_comments"]:
+            if not c["human"]:
+                break
+            before_agent.append(c["id"])
+        entry["slack"] = {"channel": CHANNEL, "ts": root["ts"], "user": owner, "posted": before_agent, "status": None}
         self.threads[root["ts"]] = id
 
     def mirror(self, id, link, ticket):
-        changed = False
+        changed, agent_spoke = False, False
         for comment in ticket["all_comments"]:
             if comment["id"] in link["posted"]:
                 continue
-            link["posted"].append(comment["id"])
-            changed = True
             if comment["text"].startswith("💬"):
-                continue  # kom fra Slack, står allerede i tråden
-            if comment["human"]:
+                pass  # kom fra Slack, står allerede i tråden
+            elif comment["human"]:
                 self.post(link, f"📝 {self.board.person(comment['author'])['name']} i Notion: {comment['text']}")
             else:
+                agent_spoke = True
                 mention = f" <@{link['user']}>" if link.get("user") and QUESTION.search(comment["text"]) else ""
                 self.post(link, comment["text"] + mention)
-        if ticket["status"] != link.get("status"):
-            if ticket["status"] in ("Trenger avklaring", "Klar"):
-                self.post_figma(id, link, ticket)
+            link["posted"].append(comment["id"])  # først etter at den er sendt
+            changed = True
+        status_changed = ticket["status"] != link.get("status")
+        if agent_spoke or (status_changed and ticket["status"] in ("Trenger avklaring", "Klar")):
+            self.post_figma(id, link, ticket)  # nye skisser og frames (de som er postet før, hoppes over)
+        if status_changed:
             if ticket["status"] in STATUS_MESSAGES:
                 self.post(link, STATUS_MESSAGES[ticket["status"]])
             link["status"] = ticket["status"]

@@ -3,8 +3,33 @@
 import json
 import re
 import sys
+import threading
 
 COLOR = sys.stdout.isatty()
+LOCK = threading.Lock()   # flere agenter skriver samtidig: én linje om gangen
+_TAG = threading.local()  # oppgavenavnet foran linjene til den agenten som kjører i denne tråden
+
+
+def set_tag(tag):
+    _TAG.value = tag
+
+
+def say(text=""):
+    """Skriver én eller flere linjer, merket med oppgaven i denne tråden, uten å krasje med spinneren."""
+    tag = getattr(_TAG, "value", "")
+    prefix = paint(f"[{tag}] ", "35") if tag else ""
+    lines = [prefix + line if line.strip() else line for line in str(text).split("\n")]
+    with LOCK:
+        sys.stdout.write(("\r\033[K" if COLOR else "") + "\n".join(lines) + "\n")
+        sys.stdout.flush()
+
+
+def status_line(text):
+    """Spinnerlinja nederst. Overskrives av neste linje fra en agent."""
+    if COLOR:
+        with LOCK:
+            sys.stdout.write("\r\033[K" + text)
+            sys.stdout.flush()
 
 
 def paint(text, code):
@@ -66,6 +91,10 @@ def describe_call(name, args):
         return "Repo", f"søker {short(args.get('pattern', ''), 50)} {args.get('path', '')}".rstrip()
     if name == "Glob":
         return "Repo", f"finner {args.get('pattern', '')}"
+    if name == "WebSearch":
+        return "Nett", f"søker «{short(args.get('query', ''), 70)}»"
+    if name == "WebFetch":
+        return "Nett", f"leser {short(args.get('url', ''), 80)}"
     if name == "Agent":
         return "Agent", f"{args.get('subagent_type', '')}: {short(args.get('description', ''), 70)}"
     if name == "Skill":
@@ -111,5 +140,5 @@ def describe_result(source, text, is_error):
 
 USED_SERVERS = {"notion-api", "claude.ai Notion", "claude.ai Figma"}
 HIDDEN_TOOLS = {"ToolSearch"}  # Claude Code som laster verktøyskjemaer, ikke agentens arbeid
-SOURCE_COLORS = {"Agent": "1", "Git": "32", "Notion": "36", "Notion API": "35", "Figma": "33", "Repo": "34", "Skill": "1"}
+SOURCE_COLORS = {"Nett": "96", "Agent": "1", "Git": "32", "Notion": "36", "Notion API": "35", "Figma": "33", "Repo": "34", "Skill": "1"}
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
