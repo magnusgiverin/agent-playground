@@ -70,6 +70,7 @@ def watch(verbose, poll):
             github.check_auth()
             if "label" in MERGE["approval"]:
                 github.ensure_label(MERGE["label"])
+            github.ensure_lane_labels()
         except (RuntimeError, FileNotFoundError) as error:
             raise SystemExit(f"PR-modus krever gh (GitHub CLI) innlogget med skrivetilgang til repoet: {error}")
     slack = None

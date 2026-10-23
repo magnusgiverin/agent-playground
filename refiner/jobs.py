@@ -18,7 +18,8 @@ from .claude import COMPACT, DEV_COMPACT, run_claude
 from .code import commits_ahead, git, prepare_workdir, push_branch, push_to_main, rebase_on_main, repo, sync_code, uncommitted, workdir
 from .config import AGENT, HERE, MERGE
 from .github import open_pr, reply_pr
-from .review import BLOCKING, ai_review, parse_review
+from .github import set_lane
+from .review import BLOCKING, ai_review, classify, parse_review
 from .display import dim, paint, say, set_tag, short
 from .sessions import news_for, save_state, session_exists
 
@@ -420,12 +421,14 @@ def review_round(board, state, id, entry, ticket, path, base, verbose):
     record(state, entry, session, "review", run)
     if not run["ok"] or not text:
         dev["review_note"] = "⚠️ AI-review feilet, så denne PR-en er ikke gjennomgått av en agent."
+        dev["review_clean"] = False
         say(paint(f"«{title}»: AI-review feilet. PR-en åpnes uten.", "33"))
         return False
     _, findings = parse_review(text)
     blocking = [f"[{severity}] {body}" for severity, body in findings if severity in BLOCKING]
     rounds = dev.get("review_rounds", 0)
     dev["review_note"] = text.strip()
+    dev["review_clean"] = not blocking
     if blocking and rounds < MERGE["review_rounds"]:
         dev["review_rounds"] = rounds + 1
         dev["review_findings"] = blocking
@@ -462,13 +465,24 @@ def _to_review(board, id, entry, ticket, path, base, report):
     note = dev.pop("review_note", "")
     dev["review_rounds"] = 0  # neste levering får nye runder
     push_branch(path, branch)
+    try:
+        lane, reasons = classify(ticket, path, base, dev)
+    except RuntimeError as error:  # usikker: manuelt løp er det trygge
+        lane, reasons = "manual", [f"klassifiseringen feilet ({short(error, 100)})"]
+    dev["lane"], dev["lane_reasons"] = lane, reasons
+    verdict = (f"**{lane}**" + (f" ({'; '.join(reasons)})" if reasons else " (liten, ufarlig endring med ren AI-review)"))
     if dev.get("pr"):
-        board.comment(id, f"🤖 Nye endringer er pushet til PR-en: {dev['pr']}\n\n{short(summary, 1500)}")
+        board.comment(id, f"🤖 Nye endringer er pushet til PR-en: {dev['pr']}\nLøp: {verdict.replace('**', '')}\n\n{short(summary, 1500)}")
     else:
         review = f"<details><summary>AI-review</summary>\n\n{note}\n\n</details>\n\n" if note else ""
-        dev["pr"] = open_pr(branch, base, ticket["title"], f"{summary}\n\n---\n{review}Oppgave i Notion: {ticket['url']}")
-        board.comment(id, f"🤖 PR-en er åpnet: {dev['pr']}\n\nDen merges når den er godkjent i GitHub eller merket "
-                          f"«{MERGE['label']}».\n\n{short(summary, 1500)}")
+        dev["pr"] = open_pr(branch, base, ticket["title"], f"{summary}\n\n---\nLøp: {verdict}\n\n{review}Oppgave i Notion: {ticket['url']}")
+        board.comment(id, f"🤖 PR-en er åpnet: {dev['pr']}\nLøp: {verdict.replace('**', '')}\n\nDen merges når den er godkjent i GitHub "
+                          f"eller merket «{MERGE['label']}»" + (", eller automatisk når CI er grønn." if lane == "auto" else ".")
+                          + f"\n\n{short(summary, 1500)}")
+    try:
+        set_lane(dev["pr"], lane)
+    except RuntimeError as error:
+        say(paint(f"Klarte ikke å sette løpsetiketten: {short(error, 200)}", "33"))
     report.unlink()  # neste runde må melde ferdig på nytt
     dev["conflict"] = False
     board.update(id, {"Status": {"status": {"name": "Til gjennomgang"}}, "Pull request": {"url": dev["pr"]},

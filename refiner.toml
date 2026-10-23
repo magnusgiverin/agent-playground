@@ -52,6 +52,17 @@ label = "godkjent"
 ai_review = true
 review_rounds = 2
 review_model = ""
+# Auto-løpet: en PR som klassifiseres som «auto» merges uten menneske når CI er grønn og AI-reviewen var ren.
+# Av som standard. Krever at repoet har CI-sjekker (uten dem faller PR-en tilbake til manuelt løp) og ai_review = true.
+auto_lane = false
+
+# Hva som skal til for at en PR kan være «auto». Alt annet blir «manual» og må godkjennes av et menneske.
+[merge.classify]
+max_lines = 150          # endrede linjer (lagt til + fjernet)
+max_files = 8
+sensitive = [".github/*", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", ".env*", "Dockerfile*", "*/auth/*", "*/migrations/*"]
+manual_sizes = ["L", "XL"]                       # oppgavestørrelser som alltid er manuelle
+manual_tags = ["security", "infrastructure"]     # etiketter på oppgaven som alltid er manuelle
 
 [slack]
 # Kanal-ID-en (for eksempel "C0123ABC") til den ene kanalen Slack-broen bruker. /new virker bare

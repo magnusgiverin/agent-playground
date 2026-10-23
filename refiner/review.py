@@ -1,6 +1,7 @@
 """Følger pull requests til de er merget (godkjenning, konflikter, lukking, med gh og uten Claude), og kjører
 AI-review i en fersk økt før PR-en åpnes."""
 
+import fnmatch
 import re
 import time
 import uuid
@@ -8,8 +9,8 @@ import uuid
 from . import github
 from .board import NETWORK_ERRORS
 from .claude import run_claude
-from .code import repo
-from .config import HERE, MERGE
+from .code import git, repo
+from .config import CLASSIFY, HERE, MERGE
 from .display import paint, say, short
 from .sessions import save_state
 
@@ -69,12 +70,17 @@ def handle(board, snap, id, ticket, entry, info):
         new = [(id, text) for id, text in feedback if id not in dev["seen_pr"]]
         if new:
             dev["feedback"] = new
+            to_manual(board, id, dev, "en reviewer har skrevet på PR-en")
             board.update(id, {"Status": {"status": {"name": "Under utvikling"}}})  # agenten tar kommentarene på PR-en
             board.comment(id, f"🤖 Det er kommet {len(new)} kommentar{'er' if len(new) != 1 else ''} på PR-en. Jeg tar dem nå: {dev['pr']}")
             snap[id]["status"] = "Under utvikling"
             say(paint(f"«{title}» fikk {len(new)} ny{'e' if len(new) != 1 else ''} PR-kommentar{'er' if len(new) != 1 else ''}. Agenten tar dem.", "33"))
             return True
-    if info["state"] == "OPEN" and approved(info):
+    ready, via_auto = info["state"] == "OPEN" and approved(info), False
+    if (info["state"] == "OPEN" and not ready and MERGE["auto_lane"] and dev.get("lane") == "auto"
+            and info["reviewDecision"] != "CHANGES_REQUESTED"):
+        ready = via_auto = auto_ready(board, id, dev)
+    if ready:
         try:
             github.merge_pr(dev["pr"], MERGE["method"])
         except RuntimeError as error:
@@ -85,6 +91,8 @@ def handle(board, snap, id, ticket, entry, info):
                 return True
             return False
         dev.pop("merge_error", None)
+        if via_auto:
+            board.comment(id, "🤖 Auto-løpet: CI er grønn og AI-reviewen var ren, så PR-en merges uten menneske.")
         info = github.pr_state(dev["pr"])
     if info["state"] == "MERGED":
         sha = (info.get("mergeCommit") or {}).get("oid")
@@ -96,6 +104,76 @@ def handle(board, snap, id, ticket, entry, info):
         say(paint(f"«{title}» er merget i {base}: {commit_url}", "32"))
         return True
     return False
+
+
+# --- Klassifisering og løp -------------------------------------------------------------------------
+
+def to_manual(board, id, dev, why):
+    """Tar en auto-PR ut av auto-løpet, med etikett og kommentar. Gjør ingenting hvis den allerede er manuell."""
+    if dev.get("lane") != "auto":
+        return
+    dev["lane"], dev["lane_reasons"] = "manual", [why]
+    try:
+        github.set_lane(dev["pr"], "manual")
+    except RuntimeError as error:
+        say(paint(f"Klarte ikke å sette etiketten manual: {short(error, 200)}", "33"))
+    board.comment(id, f"🤖 PR-en går i manuelt løp: {why}. Den må godkjennes av et menneske.")
+
+
+def ci_state(checks):
+    """none (ingen sjekker), fail, pending eller pass, ut fra [(navn, status)] fra gh."""
+    buckets = {bucket for _, bucket in checks}
+    if not checks:
+        return "none"
+    if buckets & {"fail", "cancel"}:
+        return "fail"
+    if "pending" in buckets:
+        return "pending"
+    return "pass"
+
+
+def auto_ready(board, id, dev):
+    """Kan en auto-PR merges nå, uten menneske? Venter mens CI pågår, og faller tilbake til manuelt løp uten CI eller ved feil."""
+    checks = github.pr_checks(dev["pr"])
+    state = ci_state(checks)
+    if state == "pending":
+        return False
+    if state == "pass":
+        return True
+    to_manual(board, id, dev, "repoet har ingen CI-sjekker" if state == "none"
+              else "CI feilet: " + ", ".join(name for name, bucket in checks if bucket in ("fail", "cancel")))
+    return False
+
+
+def classify(ticket, path, base, dev):
+    """(løp, årsaker): «auto» bare hvis alt under stemmer, ellers «manual» med årsakene. Leser diffen i arbeidskopien."""
+    reasons = []
+    files = lines = 0
+    sensitive = []
+    for row in git("-C", str(path), "diff", "--numstat", f"origin/{base}...HEAD").splitlines():
+        added, deleted, name = row.split("\t", 2)
+        files += 1
+        lines += (int(added) if added.isdigit() else 0) + (int(deleted) if deleted.isdigit() else 0)
+        if any(fnmatch.fnmatch(candidate, pattern) for pattern in CLASSIFY["sensitive"]
+               for candidate in (name, "/" + name, name.rsplit("/", 1)[-1])):
+            sensitive.append(name)
+    if lines > CLASSIFY["max_lines"]:
+        reasons.append(f"{lines} endrede linjer (grensen er {CLASSIFY['max_lines']})")
+    if files > CLASSIFY["max_files"]:
+        reasons.append(f"{files} endrede filer (grensen er {CLASSIFY['max_files']})")
+    if sensitive:
+        reasons.append("sensitive filer: " + ", ".join(sensitive[:5]))
+    if ticket.get("size") in CLASSIFY["manual_sizes"]:
+        reasons.append(f"oppgaven er størrelse {ticket['size']}")
+    if set(ticket.get("tags", [])) & set(CLASSIFY["manual_tags"]):
+        reasons.append("oppgaven er merket " + ", ".join(sorted(set(ticket["tags"]) & set(CLASSIFY["manual_tags"]))))
+    if not MERGE["ai_review"]:
+        reasons.append("AI-review er av")
+    elif not dev.get("review_clean"):
+        reasons.append("AI-reviewen var ikke ren")
+    if not reasons and not MERGE["auto_lane"]:
+        reasons.append("auto-løpet er av (ellers ville denne vært auto)")
+    return ("manual" if reasons else "auto"), reasons
 
 
 # --- AI-review før PR-en åpnes -------------------------------------------------------------------
