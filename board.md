@@ -37,8 +37,9 @@ Innstillingene ligger i [refiner.toml](refiner.toml): boardsiden (`[notion] boar
 | Venter på at eieren svarer på spørsmål | Trenger avklaring | ja |
 | Entydig og klar til å bygges. Utviklingsagenten tar den automatisk | Klar | nei, bare kommentarer |
 | Utviklingsagenten bygger den på en egen branch | Under utvikling | nei, bare kommentarer (svar på spørsmål der) |
+| PR-en er åpen og venter på godkjenning | Til gjennomgang | nei, bare kommentarer. Godkjenn og kommenter på PR-en i GitHub |
 
-Raffineringsagenten eier Raffinering og Klar. Utviklingsagenten (/develop-ticket) eier Under utvikling. Når den er ferdig og alle sjekkene er grønne, fører refine.py oppgavens branch rett inn i main (ingen PR), setter Fullført og legger lenken til commiten i `Pull request`. Til gjennomgang brukes ikke. Eierlåsen gjelder hele veien.
+Raffineringsagenten eier Raffinering og Klar. Utviklingsagenten (/develop-ticket) eier Under utvikling. Når den er ferdig og alle sjekkene er grønne, pusher refine.py oppgavens branch, åpner en PR, setter Til gjennomgang og legger PR-lenken i `Pull request`. Når PR-en er godkjent (eller, i auto-løpet, når CI er grønn og AI-reviewen var ren), merger refine.py den (se `[merge]` i refiner.toml) og setter Fullført. Med `mode = "main"` føres branchen i stedet rett inn i main uten PR. Eierlåsen gjelder hele veien.
 
 Tagg for oppgaver som venter på svar: `more information needed`.
 

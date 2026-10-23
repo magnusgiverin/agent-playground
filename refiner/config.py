@@ -9,6 +9,14 @@ HERE = Path(__file__).resolve().parent.parent  # prosjektroten
 CONFIG = tomllib.loads((HERE / "refiner.toml").read_text())
 AGENT = CONFIG.get("agent", {})
 SLACK = CONFIG.get("slack", {})
+# Hva som skjer når utviklingen er ferdig: «pr» (PR som må godkjennes) eller «main» (rett inn i main)
+MERGE = {"mode": "pr", "method": "squash", "approval": "review+label", "label": "godkjent",
+         "ai_review": True, "review_rounds": 2, "review_model": "", "auto_lane": False, **CONFIG.get("merge", {})}
+# Hva som skal til for at en PR kan gå i auto-løpet. Alt annet blir manuelt.
+CLASSIFY = {"max_lines": 150, "max_files": 8,
+            "sensitive": [".github/*", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", ".env*", "Dockerfile*",
+                          "*/auth/*", "*/migrations/*"],
+            "manual_sizes": ["L", "XL"], "manual_tags": ["security", "infrastructure"], **MERGE.get("classify", {})}
 
 
 def env(name):

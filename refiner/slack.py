@@ -26,7 +26,8 @@ STATUS_MESSAGES = {
     "Trenger avklaring": "❓ Agenten trenger svar på spørsmålene over. Svar her i tråden, så går svaret rett til oppgaven.",
     "Klar": "✅ Da er oppgaven klar til utvikling. Utviklingsagenten plukker den opp snarest.",
     "Under utvikling": "🚧 Utviklingsagenten bygger oppgaven nå, på en egen branch.",
-    "Fullført": "🎉 Ferdig! Branchen er ført inn i main. Lenken til commiten står over.",
+    "Til gjennomgang": "👀 PR-en er åpnet og venter på godkjenning. Lenken står over. Svar her eller på PR-en hvis noe må endres.",
+    "Fullført": "🎉 Ferdig! Endringen er i main. Lenken til commiten står over.",
 }
 QUESTION = re.compile(r"\bS\d+:")  # agentens spørsmål («🤖 S4: …»), så eieren nevnes
 FIGMA_EMBED = re.compile(r'<embed source="(https://www\.figma\.com/[^"]+)">([^<]*)</embed>')
