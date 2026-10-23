@@ -7,10 +7,10 @@ import urllib.error
 import urllib.request
 import uuid
 
-from .config import CONFIG, env
+from .config import CONFIG, MERGE, env
 
 INBOX = {"Innboks", None}  # tom status regnes som Innboks
-DONE = {"Klar", "Under utvikling", "Til gjennomgang", "Fullført"}  # Klar eller lenger (Til gjennomgang brukes ikke lenger, men tåles)
+DONE = {"Klar", "Under utvikling", "Til gjennomgang", "Fullført"}  # Klar eller lenger (Til gjennomgang: PR-en venter på godkjenning)
 NETWORK_ERRORS = (urllib.error.URLError, TimeoutError, KeyError, ValueError)
 REQUIRED_PROPERTIES = ["Oppgave", "Status", "Etiketter", "Størrelse", "Figma-lenke", "Blokkeringsnotat",
                        "Blokkert av", "Blokkerer", "Klar for pipeline", "Eier", "Pull request"]
@@ -165,7 +165,8 @@ class Board:
         schema = self.api("GET", f"data_sources/{self.data_source}")["properties"]
         missing = [name for name in REQUIRED_PROPERTIES if name not in schema]
         statuses = {o["name"] for o in schema.get("Status", {}).get("status", {}).get("options", [])}
-        missing += [f"status «{name}»" for name in REQUIRED_STATUSES if name not in statuses]
+        required = REQUIRED_STATUSES + (["Til gjennomgang"] if MERGE["mode"] == "pr" else [])
+        missing += [f"status «{name}»" for name in required if name not in statuses]
         if missing:
             sys.exit(f"Boardet mangler: {', '.join(missing)}. Legg dem til, eller oppdater board.md og refine.py.")
 

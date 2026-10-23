@@ -9,6 +9,8 @@ HERE = Path(__file__).resolve().parent.parent  # prosjektroten
 CONFIG = tomllib.loads((HERE / "refiner.toml").read_text())
 AGENT = CONFIG.get("agent", {})
 SLACK = CONFIG.get("slack", {})
+# Hva som skjer når utviklingen er ferdig: «pr» (PR som må godkjennes) eller «main» (rett inn i main)
+MERGE = {"mode": "pr", "method": "squash", "approval": "review+label", "label": "godkjent", **CONFIG.get("merge", {})}
 
 
 def env(name):

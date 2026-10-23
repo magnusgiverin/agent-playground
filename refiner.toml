@@ -35,6 +35,18 @@ figma = "https://www.figma.com/design/LC06usO0N9ckIfvwk3V7xc/Agentic-Figma-test"
 # godkjenne den før oppgaven blir Klar. Krever at Figma-kontoen din kan redigere fila.
 sketches = true
 
+[merge]
+# Hva som skjer når utviklingen er ferdig. «pr»: branchen pushes, en PR åpnes (status Til gjennomgang), og den
+# merges først når den er godkjent. «main»: branchen føres rett inn i main uten review. «pr» krever gh (GitHub CLI)
+# innlogget med skrivetilgang til repoet.
+mode = "pr"
+# squash (én commit per oppgave, anbefalt), rebase eller merge. Branchen er alltid rebaset på main først.
+method = "squash"
+# Hva som teller som godkjent: «review» (en annen person godkjenner i GitHub, forfatteren kan ikke godkjenne sin egen PR),
+# «label» (PR-en merkes med etiketten under, snarveien) eller «review+label» (begge).
+approval = "review+label"
+label = "godkjent"
+
 [slack]
 # Kanal-ID-en (for eksempel "C0123ABC") til den ene kanalen Slack-broen bruker. /new virker bare
 # der, og alle oppgaver får sin tråd der, også de som lages direkte i Notion. Påkrevd for Slack.

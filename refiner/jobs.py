@@ -1,10 +1,11 @@
 """Bestemmer hva som skal skje neste, og kjører det i riktig økt.
 
 En oppgave har opptil to økter: raffineringsøkta (entry["session"]) fra Innboks til Klar, og
-utviklingsøkta (entry["dev"]["session"]) fra Klar til koden er pushet til main. Utviklingsøkta
+utviklingsøkta (entry["dev"]["session"]) fra Klar til koden er i main. Utviklingsøkta
 forkes fra raffineringsøkta, så den husker Figma-framene og koden. Agenten jobber på en egen
 branch per oppgave. Når den melder at alt er grønt (rapport.md), legger Python branchen oppå siste
-main og pusher den rett inn i main. Det lages ingen PR.
+main. Med [merge] mode = "pr" pusher Python branchen og åpner en PR (Til gjennomgang), og review.py
+merger den når den er godkjent. Med mode = "main" pushes branchen rett inn i main.
 """
 
 import json
@@ -14,12 +15,14 @@ import uuid
 
 from .board import DONE, INBOX, NETWORK_ERRORS
 from .claude import COMPACT, DEV_COMPACT, run_claude
-from .code import commits_ahead, git, prepare_workdir, push_to_main, rebase_on_main, repo, sync_code, uncommitted, workdir
-from .config import AGENT, HERE
+from .code import commits_ahead, git, prepare_workdir, push_branch, push_to_main, rebase_on_main, repo, sync_code, uncommitted, workdir
+from .config import AGENT, HERE, MERGE
+from .github import open_pr
 from .display import dim, paint, say, set_tag, short
 from .sessions import news_for, save_state, session_exists
 
-DEVELOPING = {"Under utvikling"}
+PR_MODE = MERGE["mode"] == "pr"
+DEVELOPING = {"Under utvikling", "Til gjennomgang"} if PR_MODE else {"Under utvikling"}  # kommentarer her går til utviklingsøkta
 PUBLISH_LOCK = threading.Lock()  # én rebase og push til main om gangen, så to ferdige oppgaver ikke kolliderer
 RUNS = HERE / ".cache" / "runs.jsonl"  # én linje per Claude-kall: hva, hvor lenge, og hva det kostet
 RETRY_AFTER = [60, 300, 900]           # vent 1, 5 og 15 minutter etter en feil før neste forsøk
@@ -100,7 +103,8 @@ def next_jobs(board, snap, state, busy=()):
         dev = entry.get("dev")
         if ticket["status"] == "Under utvikling" and dev and dev.get("conflict"):
             add(id, "dev_conflict", None, "konflikt med main → agenten løser den")
-        elif ticket["status"] == "Under utvikling" and dev and not dev.get("pushed") and not ticket["blocker"]:
+        elif (ticket["status"] == "Under utvikling" and dev and not dev.get("pushed") and not dev.get("pr")
+              and not ticket["blocker"]):
             add(id, "dev_continue", None, "forrige utvikling ble avbrutt → fortsetter utviklingsøkta")
 
     # 4. Nye oppgaver i Innboks: start en økt (eller fork morens økt for oppdelte deler)
@@ -119,8 +123,10 @@ def next_jobs(board, snap, state, busy=()):
         else:
             add(id, "new", None, "ny oppgave i Innboks → starter en ny økt")
 
-    # 5a. Oppgaver fra den gamle PR-flyten (Til gjennomgang med en branch): før branchen inn i main, uten Claude
-    old = [(id, state[id]["dev"]) for id, ticket in snap.items()
+    # 5a. Oppgaver fra den gamle PR-flyten (Til gjennomgang med en branch): før branchen inn i main, uten Claude.
+    # I PR-modus følger review.py de samme PR-ene i stedet.
+    old = [] if PR_MODE else [
+           (id, state[id]["dev"]) for id, ticket in snap.items()
            if ticket["status"] == "Til gjennomgang" and (state.get(id, {}).get("dev") or {}).get("branch")
            and not state[id]["dev"].get("pushed") and not state[id]["dev"].get("conflict")]
     for id, dev in sorted(old, key=lambda item: int((item[1].get("pr") or "/0").rsplit("/", 1)[-1] or 0)):
@@ -208,8 +214,11 @@ def run_job(board, state, job, snap, verbose):
 
     if develop:
         folder = workdir(id).relative_to(HERE)
+        delivery = (f"pusher refine.py branchen og åpner en pull request (eller oppdaterer den som finnes). Den merges først "
+                    f"når et menneske har godkjent den" if PR_MODE else
+                    f"legger refine.py branchen oppå siste {base} og fører den rett inn i {base}, uten PR")
         where = (f"Arbeidskopi: {folder}/repo, på branchen {branch} (laget fra {base}). Commit på branchen. Når du skriver "
-                 f"{folder}/rapport.md, legger refine.py branchen oppå siste {base} og fører den rett inn i {base}, uten PR. "
+                 f"{folder}/rapport.md, {delivery}. "
                  "Skriv den bare når alle sjekkene er grønne.\n\n"
                  "Kommandoregler (gjelder også om du husker noe annet): bruk aldri `cd`. Kjør én kommando om gangen med "
                  f"arbeidskopien som argument: `git -C {folder}/repo status|diff|log|add|commit -m \"…\"|fetch|rebase`, "
@@ -261,6 +270,8 @@ def run_job(board, state, job, snap, verbose):
         board.update(id, {"Status": {"status": {"name": "Under utvikling"}}})
     elif develop:
         flags = ["--resume", entry["dev"]["session"]]
+        if ticket["status"] == "Til gjennomgang":  # PR-en er åpen, og agenten jobber på den igjen
+            board.update(id, {"Status": {"status": {"name": "Under utvikling"}}})
     else:
         flags = ["--resume", entry["session"]]
     # det eieren har gjort så langt, regnes som sett; det som kommer under økta, plukkes opp neste gang
@@ -296,8 +307,15 @@ def run_job(board, state, job, snap, verbose):
     except NETWORK_ERRORS:
         now = {}
     status = now.get("status")
+    dev = entry.get("dev") or {}
+    if (develop and PR_MODE and dev.get("pr") and not dev.get("pushed") and status == "Under utvikling"
+            and not now.get("blocker") and not dev.get("conflict")):
+        board.update(id, {"Status": {"status": {"name": "Til gjennomgang"}}})  # ingen ny kode å levere: tilbake til PR-en
+        status = "Til gjennomgang"
     if status == "Klar" and not develop:
         say(paint(f"«{title}» er Klar. Utviklingen starter av seg selv. Så langt: ${entry['cost']:.2f}", "32"))
+    elif status == "Til gjennomgang":
+        say(paint(f"«{title}» venter på godkjenning av PR-en: {dev.get('pr')}. Så langt: ${entry['cost']:.2f}", "32"))
     elif status == "Fullført":
         say(paint(f"«{title}» er pushet til main og Fullført. Totalt for oppgaven: ${entry['cost']:.2f}", "32"))
     elif ok and (status == "Trenger avklaring" or (status == "Under utvikling" and now.get("blocker"))):
@@ -350,6 +368,8 @@ def _publish(board, id, entry, ticket, path, base):
             board.comment(id, f"🤖 En annen oppgave har endret de samme linjene på {base}. Jeg løser konflikten og prøver igjen.")
             say(paint(f"Konflikt med {base} for «{ticket['title']}». Agenten løser den i neste runde.", "33"))
             return
+        if PR_MODE:
+            return _to_review(board, id, entry, ticket, path, base, report)
         sha = push_to_main(path, base)
         commit_url = f"{repo()[0]}/commit/{sha}"
         summary = report.read_text().strip()
@@ -361,4 +381,22 @@ def _publish(board, id, entry, ticket, path, base):
         say(paint(f"{entry['dev'].get('branch', 'Branchen')} er ført inn i {base}: {commit_url}", "32"))
     except (RuntimeError, *NETWORK_ERRORS) as error:
         say(paint(f"Klarte ikke å pushe «{ticket['title']}»: {short(error, 200)}", "31"))
-        board.comment(id, f"🤖 Koden er committet på branchen {entry['dev'].get('branch', '')}, men jeg fikk ikke ført den inn i {base}: {short(error, 300)}")
+        board.comment(id, f"🤖 Koden er committet på branchen {entry['dev'].get('branch', '')}, men jeg fikk ikke levert den videre: {short(error, 300)}")
+
+
+def _to_review(board, id, entry, ticket, path, base, report):
+    """PR-modus: pusher oppgavens branch, åpner PR-en første gang, og venter på godkjenning i Til gjennomgang."""
+    dev = entry["dev"]
+    branch, summary = dev.get("branch", ""), report.read_text().strip()
+    push_branch(path, branch)
+    if dev.get("pr"):
+        board.comment(id, f"🤖 Nye endringer er pushet til PR-en: {dev['pr']}\n\n{short(summary, 1500)}")
+    else:
+        dev["pr"] = open_pr(branch, base, ticket["title"], f"{summary}\n\n---\nOppgave i Notion: {ticket['url']}")
+        board.comment(id, f"🤖 PR-en er åpnet: {dev['pr']}\n\nDen merges når den er godkjent i GitHub eller merket "
+                          f"«{MERGE['label']}».\n\n{short(summary, 1500)}")
+    report.unlink()  # neste runde må melde ferdig på nytt
+    dev["conflict"] = False
+    board.update(id, {"Status": {"status": {"name": "Til gjennomgang"}}, "Pull request": {"url": dev["pr"]},
+                      "Blokkeringsnotat": {"rich_text": []}})
+    say(paint(f"{branch} er pushet, og PR-en venter på godkjenning: {dev['pr']}", "32"))
