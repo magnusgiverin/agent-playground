@@ -17,7 +17,7 @@ from .board import DONE, INBOX, NETWORK_ERRORS
 from .claude import COMPACT, DEV_COMPACT, run_claude
 from .code import commits_ahead, git, prepare_workdir, push_branch, push_to_main, rebase_on_main, repo, sync_code, uncommitted, workdir
 from .config import AGENT, HERE, MERGE
-from .github import open_pr
+from .github import open_pr, reply_pr
 from .display import dim, paint, say, set_tag, short
 from .sessions import news_for, save_state, session_exists
 
@@ -103,6 +103,8 @@ def next_jobs(board, snap, state, busy=()):
         dev = entry.get("dev")
         if ticket["status"] == "Under utvikling" and dev and dev.get("conflict"):
             add(id, "dev_conflict", None, "konflikt med main → agenten løser den")
+        elif ticket["status"] == "Under utvikling" and dev and dev.get("feedback"):
+            add(id, "dev_pr_feedback", None, "nye kommentarer på PR-en → agenten tar dem")
         elif (ticket["status"] == "Under utvikling" and dev and not dev.get("pushed") and not dev.get("pr")
               and not ticket["blocker"]):
             add(id, "dev_continue", None, "forrige utvikling ble avbrutt → fortsetter utviklingsøkta")
@@ -190,10 +192,10 @@ def run_job(board, state, job, snap, verbose):
     set_tag(short(ticket["title"], 28))
     if kind == "to_main":
         return finish_old_pr(board, state, id, ticket)
-    develop = kind in ("develop", "dev_feedback", "dev_continue", "dev_conflict")
+    develop = kind in ("develop", "dev_feedback", "dev_continue", "dev_conflict", "dev_pr_feedback")
     if kind in ("answered", "after_klar", "umbrella", "interrupted") and not session_exists(entry.get("session", "")):
         kind, why = "new", why + " (fant ikke økta, starter en ny)"  # økta er borte, start på nytt fra Notion
-    if kind in ("dev_feedback", "dev_continue", "dev_conflict") and not session_exists(entry["dev"].get("session", "")):
+    if kind in ("dev_feedback", "dev_continue", "dev_conflict", "dev_pr_feedback") and not session_exists(entry["dev"].get("session", "")):
         kind, why = "develop", why + " (fant ikke utviklingsøkta, starter en ny)"
 
     try:
@@ -217,9 +219,10 @@ def run_job(board, state, job, snap, verbose):
         delivery = (f"pusher refine.py branchen og åpner en pull request (eller oppdaterer den som finnes). Den merges først "
                     f"når et menneske har godkjent den" if PR_MODE else
                     f"legger refine.py branchen oppå siste {base} og fører den rett inn i {base}, uten PR")
+        reply = (f" Svar på kommentarene på PR-en i {folder}/svar.md (kort, på norsk). refine.py poster svaret på PR-en." if PR_MODE else "")
         where = (f"Arbeidskopi: {folder}/repo, på branchen {branch} (laget fra {base}). Commit på branchen. Når du skriver "
                  f"{folder}/rapport.md, {delivery}. "
-                 "Skriv den bare når alle sjekkene er grønne.\n\n"
+                 f"Skriv den bare når alle sjekkene er grønne.{reply}\n\n"
                  "Kommandoregler (gjelder også om du husker noe annet): bruk aldri `cd`. Kjør én kommando om gangen med "
                  f"arbeidskopien som argument: `git -C {folder}/repo status|diff|log|add|commit -m \"…\"|fetch|rebase`, "
                  f"`npm --prefix {folder}/repo install|run <skript>|test`, `ls {folder}/repo`, `mkdir -p {folder}/repo/…`. "
@@ -228,6 +231,8 @@ def run_job(board, state, job, snap, verbose):
             "develop": f"/develop-ticket {url}\n\n{where}",
             "dev_feedback": f"Det har kommet nye kommentarer på «{title}» ({url}) mens den er i {ticket['status']}. "
                             f"Følg /develop-ticket steg 0, «Fortsett»: svar på dem, og fiks koden hvis det trengs. {where}",
+            "dev_pr_feedback": f"Det har kommet kommentarer på PR-en til «{title}» ({url}). Følg /develop-ticket steg 8: fiks det som er "
+                               f"berettiget og forklar det du ikke gjør, i svar.md. {where}",
             "dev_continue": f"Forrige utvikling av «{title}» ({url}) ble avbrutt. Fortsett der du slapp. Sjekk med git status "
                             f"og git log hva som allerede er gjort. {where}",
             "dev_conflict": f"Commitene dine for «{title}» ({url}) kan ikke legges oppå siste {base}, fordi en annen oppgave har "
@@ -250,6 +255,9 @@ def run_job(board, state, job, snap, verbose):
             "interrupted": f"Forrige kjøring på «{title}» ({url}) ble avbrutt før den var ferdig. Fortsett der du slapp, "
                            "og sjekk i Notion hva som faktisk ble skrevet før du skriver mer.",
         }[kind]
+    pending = (entry.get("dev") or {}).get("feedback") if develop else None
+    if pending:
+        ask += "\n\nKommentarer på PR-en som venter på svar:\n" + "\n".join(f"> {short(text, 1500)}" for _, text in pending)
     prompt = ask + "\n\n" + context(ticket, code, commit, unseen)
 
     baseline = 0.0  # hva økta allerede har kostet; Claude Code oppgir totalen, ikke kostnaden for kallet
@@ -301,6 +309,8 @@ def run_job(board, state, job, snap, verbose):
 
     if develop:
         publish(board, id, entry, ticket, path, base)
+        if PR_MODE and ok and entry["dev"].get("pr"):
+            answer_pr(entry["dev"], path.parent)
     time.sleep(3)  # gi Notion et øyeblikk på å vise agentens egne endringer
     try:
         now = board.snapshot().get(id, {})
@@ -309,7 +319,7 @@ def run_job(board, state, job, snap, verbose):
     status = now.get("status")
     dev = entry.get("dev") or {}
     if (develop and PR_MODE and dev.get("pr") and not dev.get("pushed") and status == "Under utvikling"
-            and not now.get("blocker") and not dev.get("conflict")):
+            and not now.get("blocker") and not dev.get("conflict") and not dev.get("feedback")):
         board.update(id, {"Status": {"status": {"name": "Til gjennomgang"}}})  # ingen ny kode å levere: tilbake til PR-en
         status = "Til gjennomgang"
     if status == "Klar" and not develop:
@@ -384,9 +394,23 @@ def _publish(board, id, entry, ticket, path, base):
         board.comment(id, f"🤖 Koden er committet på branchen {entry['dev'].get('branch', '')}, men jeg fikk ikke levert den videre: {short(error, 300)}")
 
 
+def answer_pr(dev, folder):
+    """Poster agentens svar.md på PR-en, og regner kommentarene den svarte på som behandlet."""
+    reply = folder / "svar.md"
+    try:
+        if reply.exists() and reply.read_text().strip():
+            reply_pr(dev["pr"], "🤖 " + reply.read_text().strip())
+        reply.unlink(missing_ok=True)
+    except (RuntimeError, OSError) as error:
+        say(paint(f"Klarte ikke å svare på PR-en: {short(error, 200)}", "31"))
+        return  # prøves igjen neste gang agenten kjører
+    dev.setdefault("seen_pr", []).extend(id for id, _ in dev.pop("feedback", []))
+
+
 def _to_review(board, id, entry, ticket, path, base, report):
     """PR-modus: pusher oppgavens branch, åpner PR-en første gang, og venter på godkjenning i Til gjennomgang."""
     dev = entry["dev"]
+    dev.setdefault("seen_pr", [])  # kommentarer som kommer etter at PR-en er åpnet, skal fanges opp
     branch, summary = dev.get("branch", ""), report.read_text().strip()
     push_branch(path, branch)
     if dev.get("pr"):

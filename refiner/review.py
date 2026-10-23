@@ -13,7 +13,10 @@ CHECK_EVERY = 60  # sekunder mellom hver sjekk av en PR
 
 
 def approved(info):
-    """Godkjent av et menneske i GitHub, eller merket med godkjent-etiketten (snarveien)."""
+    """Godkjent av et menneske i GitHub, eller merket med godkjent-etiketten (snarveien).
+    Et review med «endringer ønsket» blokkerer begge deler til den som ba om dem, godkjenner eller frafaller."""
+    if info["reviewDecision"] == "CHANGES_REQUESTED":
+        return False
     by_review = "review" in MERGE["approval"] and info["reviewDecision"] == "APPROVED"
     by_label = "label" in MERGE["approval"] and MERGE["label"] in info["labels"]
     return by_review or by_label
@@ -55,6 +58,18 @@ def handle(board, snap, id, ticket, entry, info):
         snap[id]["status"] = "Under utvikling"
         say(paint(f"PR-en til «{title}» har konflikt med {base}. Agenten løser den.", "33"))
         return True
+    if info["state"] == "OPEN":
+        feedback = github.pr_feedback(dev["pr"])
+        if "seen_pr" not in dev:  # en PR vi tar over: det som står der fra før, regnes som sett
+            dev["seen_pr"] = [id for id, _ in feedback]
+        new = [(id, text) for id, text in feedback if id not in dev["seen_pr"]]
+        if new:
+            dev["feedback"] = new
+            board.update(id, {"Status": {"status": {"name": "Under utvikling"}}})  # agenten tar kommentarene på PR-en
+            board.comment(id, f"🤖 Det er kommet {len(new)} kommentar{'er' if len(new) != 1 else ''} på PR-en. Jeg tar dem nå: {dev['pr']}")
+            snap[id]["status"] = "Under utvikling"
+            say(paint(f"«{title}» fikk {len(new)} ny{'e' if len(new) != 1 else ''} PR-kommentar{'er' if len(new) != 1 else ''}. Agenten tar dem.", "33"))
+            return True
     if info["state"] == "OPEN" and approved(info):
         try:
             github.merge_pr(dev["pr"], MERGE["method"])
