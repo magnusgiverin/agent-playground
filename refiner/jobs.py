@@ -18,6 +18,7 @@ from .claude import COMPACT, DEV_COMPACT, run_claude
 from .code import commits_ahead, git, prepare_workdir, push_branch, push_to_main, rebase_on_main, repo, sync_code, uncommitted, workdir
 from .config import AGENT, HERE, MERGE
 from .github import open_pr, reply_pr
+from .review import BLOCKING, ai_review, parse_review
 from .display import dim, paint, say, set_tag, short
 from .sessions import news_for, save_state, session_exists
 
@@ -105,6 +106,8 @@ def next_jobs(board, snap, state, busy=()):
             add(id, "dev_conflict", None, "konflikt med main → agenten løser den")
         elif ticket["status"] == "Under utvikling" and dev and dev.get("feedback"):
             add(id, "dev_pr_feedback", None, "nye kommentarer på PR-en → agenten tar dem")
+        elif ticket["status"] == "Under utvikling" and dev and dev.get("review_findings"):
+            add(id, "dev_review_fix", None, "AI-review fant ting → agenten fikser dem")
         elif (ticket["status"] == "Under utvikling" and dev and not dev.get("pushed") and not dev.get("pr")
               and not ticket["blocker"]):
             add(id, "dev_continue", None, "forrige utvikling ble avbrutt → fortsetter utviklingsøkta")
@@ -192,10 +195,10 @@ def run_job(board, state, job, snap, verbose):
     set_tag(short(ticket["title"], 28))
     if kind == "to_main":
         return finish_old_pr(board, state, id, ticket)
-    develop = kind in ("develop", "dev_feedback", "dev_continue", "dev_conflict", "dev_pr_feedback")
+    develop = kind in ("develop", "dev_feedback", "dev_continue", "dev_conflict", "dev_pr_feedback", "dev_review_fix")
     if kind in ("answered", "after_klar", "umbrella", "interrupted") and not session_exists(entry.get("session", "")):
         kind, why = "new", why + " (fant ikke økta, starter en ny)"  # økta er borte, start på nytt fra Notion
-    if kind in ("dev_feedback", "dev_continue", "dev_conflict", "dev_pr_feedback") and not session_exists(entry["dev"].get("session", "")):
+    if kind in ("dev_feedback", "dev_continue", "dev_conflict", "dev_pr_feedback", "dev_review_fix") and not session_exists(entry["dev"].get("session", "")):
         kind, why = "develop", why + " (fant ikke utviklingsøkta, starter en ny)"
 
     try:
@@ -233,6 +236,8 @@ def run_job(board, state, job, snap, verbose):
                             f"Følg /develop-ticket steg 0, «Fortsett»: svar på dem, og fiks koden hvis det trengs. {where}",
             "dev_pr_feedback": f"Det har kommet kommentarer på PR-en til «{title}» ({url}). Følg /develop-ticket steg 8: fiks det som er "
                                f"berettiget og forklar det du ikke gjør, i svar.md. {where}",
+            "dev_review_fix": f"En uavhengig AI-review av «{title}» ({url}) fant ting som må fikses før PR-en åpnes. Følg "
+                              f"/develop-ticket steg 9. {where}",
             "dev_continue": f"Forrige utvikling av «{title}» ({url}) ble avbrutt. Fortsett der du slapp. Sjekk med git status "
                             f"og git log hva som allerede er gjort. {where}",
             "dev_conflict": f"Commitene dine for «{title}» ({url}) kan ikke legges oppå siste {base}, fordi en annen oppgave har "
@@ -258,6 +263,9 @@ def run_job(board, state, job, snap, verbose):
     pending = (entry.get("dev") or {}).get("feedback") if develop else None
     if pending:
         ask += "\n\nKommentarer på PR-en som venter på svar:\n" + "\n".join(f"> {short(text, 1500)}" for _, text in pending)
+    findings = (entry.get("dev") or {}).get("review_findings") if develop else None
+    if findings:
+        ask += "\n\nFunn fra AI-review som skal fikses før PR-en åpnes:\n" + "\n".join(f"> {short(text, 1500)}" for text in findings)
     prompt = ask + "\n\n" + context(ticket, code, commit, unseen)
 
     baseline = 0.0  # hva økta allerede har kostet; Claude Code oppgir totalen, ikke kostnaden for kallet
@@ -308,9 +316,13 @@ def run_job(board, state, job, snap, verbose):
         say(paint(f"«{title}» feilet. Prøver igjen om {wait // 60} min.", "33"))
 
     if develop:
-        publish(board, id, entry, ticket, path, base)
-        if PR_MODE and ok and entry["dev"].get("pr"):
-            answer_pr(entry["dev"], path.parent)
+        if ok:
+            entry["dev"].pop("review_findings", None)  # kjøringen har fått dem i prompten
+        fix = PR_MODE and ok and MERGE["ai_review"] and review_round(board, state, id, entry, ticket, path, base, verbose)
+        if not fix:  # ellers fikser dev-agenten funnene først, og PR-en venter
+            publish(board, id, entry, ticket, path, base)
+            if PR_MODE and ok and entry["dev"].get("pr"):
+                answer_pr(entry["dev"], path.parent)
     time.sleep(3)  # gi Notion et øyeblikk på å vise agentens egne endringer
     try:
         now = board.snapshot().get(id, {})
@@ -319,7 +331,8 @@ def run_job(board, state, job, snap, verbose):
     status = now.get("status")
     dev = entry.get("dev") or {}
     if (develop and PR_MODE and dev.get("pr") and not dev.get("pushed") and status == "Under utvikling"
-            and not now.get("blocker") and not dev.get("conflict") and not dev.get("feedback")):
+            and not now.get("blocker") and not dev.get("conflict") and not dev.get("feedback")
+            and not dev.get("review_findings")):
         board.update(id, {"Status": {"status": {"name": "Til gjennomgang"}}})  # ingen ny kode å levere: tilbake til PR-en
         status = "Til gjennomgang"
     if status == "Klar" and not develop:
@@ -394,6 +407,40 @@ def _publish(board, id, entry, ticket, path, base):
         board.comment(id, f"🤖 Koden er committet på branchen {entry['dev'].get('branch', '')}, men jeg fikk ikke levert den videre: {short(error, 300)}")
 
 
+def review_round(board, state, id, entry, ticket, path, base, verbose):
+    """AI-review i en fersk økt før PR-en åpnes. Returnerer True hvis dev-agenten skal fikse funn først
+    (da fjernes rapport.md, så ingenting leveres). Ellers lagres review-teksten til PR-beskrivelsen."""
+    dev = entry["dev"]
+    report = path.parent / "rapport.md"
+    if not report.exists() or not (commits_ahead(path, base) or uncommitted(path)):
+        return False
+    title = ticket["title"]
+    say(paint(f"«{title}»: AI-review i en fersk økt…", "1"))
+    run, session, text = ai_review(ticket, path, dev.get("branch", ""), base, verbose)
+    record(state, entry, session, "review", run)
+    if not run["ok"] or not text:
+        dev["review_note"] = "⚠️ AI-review feilet, så denne PR-en er ikke gjennomgått av en agent."
+        say(paint(f"«{title}»: AI-review feilet. PR-en åpnes uten.", "33"))
+        return False
+    _, findings = parse_review(text)
+    blocking = [f"[{severity}] {body}" for severity, body in findings if severity in BLOCKING]
+    rounds = dev.get("review_rounds", 0)
+    dev["review_note"] = text.strip()
+    if blocking and rounds < MERGE["review_rounds"]:
+        dev["review_rounds"] = rounds + 1
+        dev["review_findings"] = blocking
+        report.unlink()  # ikke ferdig: dev-agenten må fikse og melde ferdig på nytt
+        board.comment(id, f"🤖 AI-review fant {len(blocking)} ting som må fikses (runde {rounds + 1} av {MERGE['review_rounds']}):\n"
+                          + "\n".join(f"- {short(item, 300)}" for item in blocking))
+        say(paint(f"«{title}»: {len(blocking)} funn fra AI-review. Dev-agenten fikser dem (runde {rounds + 1} av {MERGE['review_rounds']}).", "33"))
+        return True
+    if blocking:
+        say(paint(f"«{title}»: {len(blocking)} funn gjenstår etter {rounds} runder. PR-en åpnes med dem i beskrivelsen.", "33"))
+    else:
+        say(paint(f"«{title}»: AI-review ferdig. " + (f"{len(findings)} små funn." if findings else "Ingen funn."), "32"))
+    return False
+
+
 def answer_pr(dev, folder):
     """Poster agentens svar.md på PR-en, og regner kommentarene den svarte på som behandlet."""
     reply = folder / "svar.md"
@@ -412,11 +459,14 @@ def _to_review(board, id, entry, ticket, path, base, report):
     dev = entry["dev"]
     dev.setdefault("seen_pr", [])  # kommentarer som kommer etter at PR-en er åpnet, skal fanges opp
     branch, summary = dev.get("branch", ""), report.read_text().strip()
+    note = dev.pop("review_note", "")
+    dev["review_rounds"] = 0  # neste levering får nye runder
     push_branch(path, branch)
     if dev.get("pr"):
         board.comment(id, f"🤖 Nye endringer er pushet til PR-en: {dev['pr']}\n\n{short(summary, 1500)}")
     else:
-        dev["pr"] = open_pr(branch, base, ticket["title"], f"{summary}\n\n---\nOppgave i Notion: {ticket['url']}")
+        review = f"<details><summary>AI-review</summary>\n\n{note}\n\n</details>\n\n" if note else ""
+        dev["pr"] = open_pr(branch, base, ticket["title"], f"{summary}\n\n---\n{review}Oppgave i Notion: {ticket['url']}")
         board.comment(id, f"🤖 PR-en er åpnet: {dev['pr']}\n\nDen merges når den er godkjent i GitHub eller merket "
                           f"«{MERGE['label']}».\n\n{short(summary, 1500)}")
     report.unlink()  # neste runde må melde ferdig på nytt

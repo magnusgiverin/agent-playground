@@ -1,11 +1,15 @@
-"""Følger pull requests til de er merget: godkjenning, konflikter og lukking. Bruker gh, ikke Claude."""
+"""Følger pull requests til de er merget (godkjenning, konflikter, lukking, med gh og uten Claude), og kjører
+AI-review i en fersk økt før PR-en åpnes."""
 
+import re
 import time
+import uuid
 
 from . import github
 from .board import NETWORK_ERRORS
+from .claude import run_claude
 from .code import repo
-from .config import MERGE
+from .config import HERE, MERGE
 from .display import paint, say, short
 from .sessions import save_state
 
@@ -92,3 +96,29 @@ def handle(board, snap, id, ticket, entry, info):
         say(paint(f"«{title}» er merget i {base}: {commit_url}", "32"))
         return True
     return False
+
+
+# --- AI-review før PR-en åpnes -------------------------------------------------------------------
+
+BLOCKING = ("alvorlig", "middels")  # disse sendes tilbake til dev-agenten, «liten» havner bare i PR-beskrivelsen
+FINDING = re.compile(r"^\s*\d+\.\s*\[(alvorlig|middels|liten)\]\s*(.+)$", re.I | re.M)
+
+
+def parse_review(text):
+    """(rent, funn) fra reviewen. funn er [(alvorlighet, tekst)]. Uten funn regnes det som rent."""
+    findings = [(severity.lower(), body.strip()) for severity, body in FINDING.findall(text)]
+    return not findings, findings
+
+
+def ai_review(ticket, path, branch, base, verbose=False):
+    """Kjører review-økta i en fersk økt (ingen --resume eller --fork-session, så den ikke kjenner dev-agentens historikk).
+    Returnerer (kjøring, økt-ID, reviewen eller None). Reviewen er økta sitt siste svar, fra «Resultat:» og utover."""
+    folder = path.parent.relative_to(HERE)
+    session = str(uuid.uuid4())
+    prompt = (f"/review-ticket {ticket['url']}\n\nArbeidskopi: {folder}/repo, på branchen {branch}. Diffen er mot origin/{base}. "
+              f"Svar med reviewen som siste melding, i formatet skillen beskriver. Dette er en automatisk økt uten noe menneske som kan svare.\n\nKommandoregler: bruk aldri `cd`. Kjør én kommando om gangen, for eksempel "
+              f"`git -C {folder}/repo diff origin/{base}...HEAD`, `git -C {folder}/repo log origin/{base}..HEAD`, og "
+              f"`ls {folder}/repo`. Les filer med Read, og søk med Grep og Glob med path satt til {folder}/repo.")
+    run = run_claude(prompt, ["--session-id", session], verbose, review=True)
+    start = run["result"].find("Resultat:")
+    return run, session, run["result"][start:] if start >= 0 else None

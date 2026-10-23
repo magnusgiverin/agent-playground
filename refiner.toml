@@ -46,6 +46,12 @@ method = "squash"
 # «label» (PR-en merkes med etiketten under, snarveien) eller «review+label» (begge).
 approval = "review+label"
 label = "godkjent"
+# AI-review før PR-en åpnes: en fersk økt (uten dev-agentens historikk) sjekker diffen mot kontrakten i oppgaven.
+# Alvorlige og middels funn sendes tilbake til dev-agenten, opptil review_rounds ganger. Deretter åpnes PR-en
+# uansett, med funnene som gjenstår i beskrivelsen. Tom review_model betyr samme modell som dev_model.
+ai_review = true
+review_rounds = 2
+review_model = ""
 
 [slack]
 # Kanal-ID-en (for eksempel "C0123ABC") til den ene kanalen Slack-broen bruker. /new virker bare

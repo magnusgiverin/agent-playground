@@ -10,7 +10,8 @@ CONFIG = tomllib.loads((HERE / "refiner.toml").read_text())
 AGENT = CONFIG.get("agent", {})
 SLACK = CONFIG.get("slack", {})
 # Hva som skjer når utviklingen er ferdig: «pr» (PR som må godkjennes) eller «main» (rett inn i main)
-MERGE = {"mode": "pr", "method": "squash", "approval": "review+label", "label": "godkjent", **CONFIG.get("merge", {})}
+MERGE = {"mode": "pr", "method": "squash", "approval": "review+label", "label": "godkjent",
+         "ai_review": True, "review_rounds": 2, "review_model": "", **CONFIG.get("merge", {})}
 
 
 def env(name):
