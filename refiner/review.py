@@ -197,6 +197,6 @@ def ai_review(ticket, path, branch, base, verbose=False):
               f"Svar med reviewen som siste melding, i formatet skillen beskriver. Dette er en automatisk økt uten noe menneske som kan svare.\n\nKommandoregler: bruk aldri `cd`. Kjør én kommando om gangen, for eksempel "
               f"`git -C {folder}/repo diff origin/{base}...HEAD`, `git -C {folder}/repo log origin/{base}..HEAD`, og "
               f"`ls {folder}/repo`. Les filer med Read, og søk med Grep og Glob med path satt til {folder}/repo.")
-    run = run_claude(prompt, ["--session-id", session], verbose, review=True)
+    run = run_claude(prompt, ["--session-id", session], verbose, "pr_review")
     start = run["result"].find("Resultat:")
     return run, session, run["result"][start:] if start >= 0 else None

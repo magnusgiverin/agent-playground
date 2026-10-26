@@ -48,6 +48,10 @@ Er `[design] figma` i refiner.toml tom, kan du ikke skissere. Spør da eieren om
   `**S5**: Godkjenner du skissen (v2)? Svar «godkjent», eller skriv hva som skal endres. _Uten svar bygger jeg ikke videre._`
   Dette spørsmålet har ingen antakelse å falle tilbake på. Oppgaven kan ikke bli Klar før skissen er godkjent.
 
+## 4b. Modus: flere antakelser
+
+Står det `Modus: flere antakelser` i meldingen, legger du fram skissen som over, men spør ikke om godkjenning og venter ikke. Merk versjonen `**Skisse v1 (antatt godkjent):**` under Design, og la refine-ticket fortsette. Kommenterer eieren på skissen senere, er det steg 5 som gjelder.
+
 ## 5. Når eieren svarer
 
 - **Godkjent** («godkjent», «ser bra ut», «kjør» og lignende): merk versjonen som godkjent under Design og spørsmålet som besvart, og fortsett refine-ticket som vanlig.

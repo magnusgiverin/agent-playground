@@ -32,6 +32,22 @@ def save_state(state):
         STATE.write_text(text)
 
 
+META = HERE / ".cache" / "meta.json"  # tilstand som ikke hører til én oppgave (for eksempel når det sist ble ryddet)
+
+
+def load_meta():
+    try:
+        return json.loads(META.read_text())
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def save_meta(meta):
+    with LOCK:
+        META.parent.mkdir(parents=True, exist_ok=True)
+        META.write_text(json.dumps(meta, indent=2))
+
+
 def session_exists(session_id):
     return any((Path.home() / ".claude" / "projects").glob(f"*/{session_id}.jsonl"))
 
