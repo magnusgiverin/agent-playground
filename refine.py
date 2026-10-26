@@ -33,9 +33,11 @@ if __name__ == "__main__" and VENV_PYTHON.exists() and Path(sys.prefix).resolve(
 
 from refiner.board import Board, InlineWatcher, NETWORK_ERRORS
 from refiner.code import repo
-from refiner.config import AGENT
+from refiner.config import AGENT, MERGE
+from refiner import github
 from refiner.display import COLOR, SPINNER, dim, paint, say, short, status_line
 from refiner.jobs import ASSUME, TIDY, adoptable, next_jobs, run_job, run_tidy
+from refiner.review import watch_prs
 from refiner.sessions import load_state, news_for, save_state
 from refiner import slack as slack_bridge
 
@@ -64,6 +66,14 @@ def watch(verbose, poll):
         raise SystemExit(str(error))
     board, state = Board(), load_state()
     board.check_schema()
+    if MERGE["mode"] == "pr":  # stopp med en gang hvis gh ikke er logget inn, før noen økt bruker tokens
+        try:
+            github.check_auth()
+            if "label" in MERGE["approval"]:
+                github.ensure_label(MERGE["label"])
+            github.ensure_lane_labels()
+        except (RuntimeError, FileNotFoundError) as error:
+            raise SystemExit(f"PR-modus krever gh (GitHub CLI) innlogget med skrivetilgang til repoet: {error}")
     slack = None
     if slack_bridge.enabled():
         try:
@@ -115,6 +125,8 @@ def watch(verbose, poll):
                         entry.pop("failed", None), entry.pop("retry_after", None), entry.update(attempts=0)
                 if slack and slack.sync(snap, state):
                     save_state(state)
+                if MERGE["mode"] == "pr":
+                    watch_prs(board, snap, state, busy=set(running))
                 jobs = next_jobs(board, snap, state, busy=set(running))
             except NETWORK_ERRORS as error:
                 jobs, checked = [], paint(f"feil: {short(error, 60)}", "31")

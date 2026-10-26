@@ -128,6 +128,16 @@ def rebase_on_main(path, base):
     return False
 
 
+def push_branch(path, branch):
+    """Pusher oppgavens branch (ikke main). Den rebases på main mellom rundene, derfor force-with-lease.
+    Klonen er --single-branch, så git finner ingen sporingsref for branchen selv. Vi lagrer det vi sist pushet,
+    og bruker det som forventet verdi: leasen betyr «bare hvis ingen andre har pushet siden sist».
+    Tom forventet verdi (første push) betyr at branchen ikke skal finnes fra før."""
+    last = git("-C", str(path), "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}", check=False)
+    git("-C", str(path), "push", "--quiet", f"--force-with-lease=refs/heads/{branch}:{last}", "origin", f"HEAD:refs/heads/{branch}")
+    git("-C", str(path), "update-ref", f"refs/remotes/origin/{branch}", "HEAD")
+
+
 def push_to_main(path, base):
     """Fører branchen inn i main (fast-forward, siden den nettopp er rebaset) og pusher. Returnerer commit-ID-en."""
     git("-C", str(path), "push", "--quiet", "origin", f"HEAD:{base}")
