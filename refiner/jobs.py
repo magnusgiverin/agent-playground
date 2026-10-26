@@ -17,7 +17,7 @@ from .board import DONE, INBOX, NETWORK_ERRORS
 from .claude import COMPACT, DEV_COMPACT, run_claude
 from .code import commits_ahead, git, prepare_workdir, push_branch, push_to_main, rebase_on_main, repo, sync_code, uncommitted, workdir
 from .config import AGENT, HERE, MERGE
-from .github import open_pr, reply_pr
+from .github import find_pr, open_pr, reply_pr
 from .github import set_lane
 from .review import BLOCKING, ai_review, classify, parse_review
 from .display import dim, paint, say, set_tag, short
@@ -613,6 +613,8 @@ def _to_review(board, id, entry, ticket, path, base, report):
         lane, reasons = "manual", [f"klassifiseringen feilet ({short(error, 100)})"]
     dev["lane"], dev["lane_reasons"] = lane, reasons
     verdict = (f"**{lane}**" + (f" ({'; '.join(reasons)})" if reasons else " (liten, ufarlig endring med ren AI-review)"))
+    if not dev.get("pr"):
+        dev["pr"] = find_pr(branch)  # tilstanden kan ha mistet en PR som allerede er åpnet; gh pr create feiler da
     if dev.get("pr"):
         board.comment(id, f"🤖 Nye endringer er pushet til PR-en: {dev['pr']}\nLøp: {verdict.replace('**', '')}\n\n{short(summary, 1500)}")
     else:

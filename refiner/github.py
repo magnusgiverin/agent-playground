@@ -63,6 +63,11 @@ def open_pr(branch, base, title, body):
     return gh("pr", "create", "--repo", slug(), "--head", branch, "--base", base, "--title", title, "--body", body)
 
 
+def find_pr(branch):
+    """URL-en til en åpen PR fra branchen, eller tom streng. Brukes når tilstanden har mistet en PR som allerede finnes."""
+    return gh("pr", "list", "--repo", slug(), "--head", branch, "--state", "open", "--json", "url", "--jq", ".[0].url // empty")
+
+
 def pr_state(url):
     """state (OPEN, MERGED, CLOSED), reviewDecision, labels (navn), mergeable og mergeCommit."""
     info = json.loads(gh("pr", "view", url, "--json", "state,reviewDecision,labels,mergeable,mergeCommit"))

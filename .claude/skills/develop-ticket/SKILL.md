@@ -34,6 +34,7 @@ Du kjører uten noen som kan godkjenne kommandoer, så bare kommandoene under er
 - Sjekkverktøy kjører du via prosjektets npm-skript (`npm --prefix … run lint`, `run typecheck`). Mangler et skript, legger du det til i `package.json`.
 - Nytt prosjekt: lag filene (også `package.json`) med Write, og kjør så `npm --prefix … install`. Bruk ikke generatorer som `npm create` eller `npx create-…`, fordi de spør interaktivt.
 - Hjelpere: `ls .cache/work/<id>/…`, `wc`, `which`, `node -v`, `mkdir -p .cache/work/<id>/…`
+- Sletting: `rm .cache/work/<id>/repo/<fil>`, `rm -r .cache/work/<id>/repo/<mappe>` eller `git -C .cache/work/<id>/repo rm <fil>`. Aldri med `-f`, og aldri på stier utenfor arbeidskopien. Slett bare det oppgaven faktisk krever (filer den gjør overflødige, eller som akseptansekriteriene ber om fjernet). Er du i tvil, lar du filen stå og nevner den i rapporten under «Ikke gjort».
 
 Filer leser du med Read, lister med Glob og lager eller endrer med Write og Edit, ikke med `cat`, `echo` eller `sed`. Blir en kommando avvist, skriver du den om etter reglene over. Ikke gi opp. Får du likevel ikke kjørt noe du trenger, skriver du nøyaktig hvilken kommando som ble avvist i spørsmålet til eieren.
 

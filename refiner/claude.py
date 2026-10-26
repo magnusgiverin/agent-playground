@@ -23,6 +23,8 @@ DEV_TOOLS = [
     # og Claude Code stopper alltid «cd <mappe> && git …», så agenten bruker git -C og npm --prefix
     "Bash(ls .cache/work/*)", "Bash(wc *)", "Bash(which *)", "Bash(node -v)", "Bash(node --version)",
     "Bash(mkdir -p .cache/work/*)",
+    # sletting, bare i arbeidskopiene (uten -f)
+    "Bash(rm .cache/work/*)", "Bash(rm -r .cache/work/*)", "Bash(git -C .cache/work/* rm *)",
     "mcp__claude_ai_Figma__get_design_context", "mcp__claude_ai_Figma__get_variable_defs",
 ]
 # Review-økta kan bare lese arbeidskopien og oppgaven. Den skriver ingen filer, kjører ingen bygg eller tester, og skriver ikke i Notion.
