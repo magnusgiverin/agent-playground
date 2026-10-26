@@ -17,7 +17,7 @@ Folk kan bare redigere oppgaver i **Innboks** og **Trenger avklaring**. **Raffin
 
 Kjør `/sync-code`. Feiler den, stopper du runden og rapporterer feilen. Ta vare på kodemappa og GitHub-URL-en den gir deg, som kodeargumentene (se board.md).
 
-Les refiner.toml. `notion-fetch` boardsiden fra `[notion] board`, og hent så datakilden til oppgavedatabasen på den. Bekreft at alle egenskaper og statuser fra board.md finnes. Mangler noe, stopper du og rapporterer nøyaktig hva som må legges til. Endre aldri boardets skjema selv.
+Finn boardsiden under «Oppsettet for denne instansen» i systemprompten, eller med `python3 refine.py --oppsett`. `notion-fetch` den, og hent så datakilden til oppgavedatabasen på den. Bekreft at alle egenskaper og statuser fra board.md finnes. Hopp over oppgaver der `Agent` viser en annen instans som `jobber` med et tidspunkt fram i tid. Da jobber en annen agent på dem nå. Mangler noe, stopper du og rapporterer nøyaktig hva som må legges til. Endre aldri boardets skjema selv.
 
 ## 2. Vakt: rull tilbake endringer folk ikke har lov til å gjøre
 

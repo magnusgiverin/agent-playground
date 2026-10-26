@@ -4,18 +4,21 @@ import json
 import subprocess
 import time
 
-from .config import AGENT, CONFIG, HERE, rules_prompt
+from .config import AGENT, DESIGN, HERE, INSTANCE, rules_prompt
 from .display import say, HIDDEN_TOOLS, SOURCE_COLORS, USED_SERVERS, describe_call, describe_result, dim, paint, result_text, short
 
 
 # Ekstra verktøy for utviklingsøkter. Redigering og kommandoer er begrenset til arbeidskopiene i
 # .cache/work. Push og PR gjør Python etterpå, så agenten kan aldri pushe selv.
+# NB: Write styres av Edit-regler. En Write(...)-regel slipper ingenting gjennom.
 DEV_TOOLS = [
-    "Edit(.cache/work/**)", "Write(.cache/work/**)",
+    "Edit(.cache/work/**)",
     "Bash(npm *)", "Bash(corepack pnpm *)", "Bash(npx tsc*)", "Bash(npx eslint*)",
     "Bash(npx prettier*)", "Bash(npx vitest*)", "Bash(npx jest*)", "Bash(npx playwright*)",
     "Bash(git -C .cache/work/* status*)", "Bash(git -C .cache/work/* diff*)", "Bash(git -C .cache/work/* add *)",
     "Bash(git -C .cache/work/* commit *)", "Bash(git -C .cache/work/* log*)",
+    # slette og flytte filer: Write og Edit kan ikke slette, så det skjer med git i arbeidskopien
+    "Bash(git -C .cache/work/* rm *)", "Bash(git -C .cache/work/* mv *)",
     # konflikter med main løses på branchen; --continue uten editor, siden ingen kan skrive i den
     "Bash(git -C .cache/work/* fetch origin *)", "Bash(git -C .cache/work/* rebase origin/*)",
     "Bash(git -C .cache/work/* rebase --abort)", "Bash(git -C .cache/work/* -c core.editor=true rebase --continue)",
@@ -30,7 +33,7 @@ SKETCH_TOOLS = ["ReadMcpResourceTool", "mcp__claude_ai_Figma__create_session", "
                 "mcp__claude_ai_Figma__search_design_system", "mcp__claude_ai_Figma__get_screenshot"]
 # Gjennomgang før main: kan lese, kjøre sjekkene og skrive dommen (review.md), men ikke endre koden
 REVIEW_TOOLS = [
-    "Write(.cache/work/*/review.md)",
+    "Edit(.cache/work/*/review.md)",  # bare dommen; all annen skriving avvises
     "Bash(npm *)", "Bash(corepack pnpm *)", "Bash(npx tsc*)", "Bash(npx eslint*)", "Bash(npx vitest*)", "Bash(npx jest*)",
     "Bash(git -C .cache/work/* diff*)", "Bash(git -C .cache/work/* log*)", "Bash(git -C .cache/work/* show*)",
     "Bash(git -C .cache/work/* status*)", "Bash(ls .cache/work/*)", "Bash(wc *)",
@@ -59,26 +62,28 @@ def claude_command(prompt, session_flags, mode="refine"):
            "--disallowedTools", *NEVER,
            "--mcp-config", str(HERE / ".mcp.json"), "--output-format", "stream-json", "--verbose"]
     allowed = (list(WEB_TOOLS) if AGENT.get("web", True) else []) + extra
-    if mode == "refine" and CONFIG.get("design", {}).get("sketches", True) and CONFIG.get("design", {}).get("figma"):
+    if mode == "refine" and DESIGN.get("sketches", True) and INSTANCE.figma:
         allowed += SKETCH_TOOLS
     if allowed:
         cmd += ["--allowedTools", *allowed]
-    local = CONFIG.get("code", {}).get("local")
-    if local:  # en mappe utenfor prosjektet må legges til eksplisitt
-        cmd += ["--add-dir", str((HERE / local).resolve())]
+    if INSTANCE.local:  # en mappe utenfor prosjektet må legges til eksplisitt
+        cmd += ["--add-dir", str((HERE / INSTANCE.local).resolve())]
     return cmd
 
 
-def run_claude(prompt, session_flags, verbose=False, mode="refine", baseline=0.0):
+def run_claude(prompt, session_flags, verbose=False, mode="refine", baseline=0.0, lease=None):
     """Kjører én Claude-tur og viser hvert steg.
 
     Claude Code oppgir kostnaden for hele økta (fortsettelser og forker arver tidligere kostnad), så
     kostnaden for akkurat dette kallet er totalen minus det økta hadde kostet før (baseline).
-    Returnerer en dict: ok, cost (dette kallet), total (økta så langt), turns, seconds, context (tokens per steg)."""
+    Returnerer en dict: ok, cost (dette kallet), total (økta så langt), turns, seconds, context (tokens per steg).
+    Med lease stoppes prosessen hvis en annen instans tar over oppgaven (se lease.py)."""
     cmd = claude_command(prompt, session_flags, mode)
     run = {"ok": False, "cost": 0.0, "total": baseline, "turns": 0, "seconds": 0.0, "context": 0}
     calls = {}  # tool_use_id -> (kilde, startet)
     proc = subprocess.Popen(cmd, cwd=HERE, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True, bufsize=1)
+    if lease:
+        lease.proc = proc
     for line in proc.stdout:
         try:
             event = json.loads(line)

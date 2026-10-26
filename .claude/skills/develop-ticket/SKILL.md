@@ -1,11 +1,11 @@
 ---
 name: develop-ticket
-description: Bygger én Klar-oppgave fra Notion i en egen arbeidskopi på en egen branch. Implementerer etter akseptansekriteriene i Raffinering-seksjonen og den godkjente skissen i Figma, kjører prosjektets sjekker og tester, committer og skriver en ferdigrapport. refine.py fører så branchen rett inn i main (ingen PR) og flytter oppgaven til Fullført. Alt skrives på norsk. Brukes når refine.py starter en utviklingsøkt, eller når noen ber om å bygge en bestemt oppgave.
+description: Bygger én Klar-oppgave fra Notion i en egen arbeidskopi på en egen branch. Implementerer etter akseptansekriteriene i Raffinering-seksjonen og den godkjente skissen i Figma, kjører prosjektets sjekker og tester, committer og skriver en ferdigrapport. refine.py flytter så oppgaven til Til gjennomgang, lar en egen agent gjennomgå endringen, og fører branchen rett inn i main (ingen PR) og flytter oppgaven til Fullført når den er godkjent. Alt skrives på norsk. Brukes når refine.py starter en utviklingsøkt, eller når noen ber om å bygge en bestemt oppgave.
 ---
 
 # Bygg en oppgave
 
-Du gjør én Klar-oppgave om til en ferdig endring som går rett inn i main. Raffinering-seksjonen på oppgaven er kontrakten: akseptansekriteriene, omfanget, designet (med den godkjente skissen) og antakelsene. **Alt du skriver (kommentarer, commit-meldinger og rapporten) er på norsk (bokmål).** Det er ingen review før koden er i main, så du er selv den siste kontrollen.
+Du gjør én Klar-oppgave om til en ferdig endring som går rett inn i main. Raffinering-seksjonen på oppgaven er kontrakten: akseptansekriteriene, omfanget, designet (med den godkjente skissen) og antakelsene. **Alt du skriver (kommentarer, commit-meldinger og rapporten) er på norsk (bokmål).** Det er ingen menneskelig review før koden er i main, bare en kritisk gjennomgang av en annen agent, så vær din egen strengeste kontroll.
 
 **Fortell underveis**, med én kort linje før og etter hvert steg, som starter med oppgavetittelen. For eksempel `«Sticky header»: implementerer AK 1–3 i src/App.tsx…` og så `Ferdig. typecheck og build er grønne.`
 
@@ -23,13 +23,13 @@ Du gjør én Klar-oppgave om til en ferdig endring som går rett inn i main. Raf
 ### 0. Start eller fortsett
 
 - **Ny utviklingsøkt:** du er forket fra raffineringsøkta, så du husker koden og Figma-framene derfra. Les likevel Raffinering-seksjonen på nytt med `API-retrieve-page-markdown`. Det er den som gjelder.
-- **Fortsatt økt** (nye kommentarer, eller en avbrutt kjøring): de nye kommentarene står i meldingen. Sjekk `git status` og `git log` i arbeidskopien for å se hvor du er. Svar på kommentarene, og fiks koden hvis de ber om det. Ble du vekket på grunn av **konflikt med main**, står fremgangsmåten i meldingen: rebase branchen på `origin/main`, løs konfliktene, kjør alle sjekkene på nytt og skriv `rapport.md` igjen.
+- **Fortsatt økt** (nye kommentarer, eller en avbrutt kjøring): de nye kommentarene står i meldingen. Sjekk `git status` og `git log` i arbeidskopien for å se hvor du er. Commitene kan være laget av en agent på en annen PC: refine.py deler branchen via GitHub, så den som tar over, fortsetter derfra. Svar på kommentarene, og fiks koden hvis de ber om det. Ble du vekket på grunn av **konflikt med main**, står fremgangsmåten i meldingen: rebase branchen på `origin/main`, løs konfliktene, kjør alle sjekkene på nytt og skriv `rapport.md` igjen.
 
 ### Kommandoer
 
 Du kjører uten noen som kan godkjenne kommandoer, så bare kommandoene under er tillatt. Bruk **aldri** `cd`. Claude Code avviser alltid `cd <mappe> && git …`, og en sammensatt kommando avvises hvis én del ikke er tillatt. Gi i stedet arbeidskopien som argument, og kjør én kommando om gangen:
 
-- git: `git -C .cache/work/<id>/repo status`, `diff`, `log`, `add`, `commit -m "…"`. Ved konflikt også `fetch origin main`, `rebase origin/main`, `rebase --abort` og `-c core.editor=true rebase --continue`. Aldri `push`, `remote` eller `config`, og bytt aldri branch.
+- git: `git -C .cache/work/<id>/repo status`, `diff`, `log`, `add`, `commit -m "…"`, `rm <fil>` (slette filer, også med glob som `rm src/components/*.module.css`) og `mv <fra> <til>` (flytte eller gi nytt navn). Ved konflikt også `fetch origin main`, `rebase origin/main`, `rebase --abort` og `-c core.editor=true rebase --continue`. Aldri `push`, `remote` eller `config`, og bytt aldri branch.
 - npm: `npm --prefix .cache/work/<id>/repo install`, `npm --prefix .cache/work/<id>/repo run build`, `npm --prefix .cache/work/<id>/repo test`. Nye pakker legger du til med `npm --prefix .cache/work/<id>/repo install <pakke>`. pnpm-prosjekter: `corepack pnpm --dir .cache/work/<id>/repo …`
 - Sjekkverktøy kjører du via prosjektets npm-skript (`npm --prefix … run lint`, `run typecheck`). Mangler et skript, legger du det til i `package.json`.
 - Nytt prosjekt: lag filene (også `package.json`) med Write, og kjør så `npm --prefix … install`. Bruk ikke generatorer som `npm create` eller `npx create-…`, fordi de spør interaktivt.

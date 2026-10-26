@@ -1,96 +1,148 @@
-# Raffineringsagent
+# Raffinerings- og utviklingsagent
 
-Gjør grove Notion-oppgaver om til spesifikasjoner en utvikler kan bygge uten å gjette. Den jobber i en løkke med oppgavens eier til ingenting er uklart. Den er bygd av Claude Code-skills som leser Notion og Figma via claude.ai-koblingene, og skriver til Notion via Notion API. Den leser produktkoden, men endrer den aldri. Alt den skriver, er på norsk.
+Gjør grove Notion-oppgaver om til spesifikasjoner en utvikler kan bygge uten å gjette, og bygger dem. Den jobber i en løkke med oppgavens eier til ingenting er uklart, tegner skisser i Figma, bygger på en egen branch, lar en egen agent gjennomgå endringen og fører den inn i main. Den er bygd av Claude Code-skills og en liten Python-løkke. Alt den skriver, er på norsk.
 
 ```
 Innboks ──(Eier + «Klar for pipeline»)──▶ Raffinering ─▶ Trenger avklaring ⟲ (eieren svarer i Notion eller Slack)
-                                                 │      visuell endring → skisse i Figma («🤖 Skisser») → må godkjennes
-                                                 ▼
-                                               Klar ──(automatisk)──▶ Under utvikling (egen branch) ──(alt grønt)──▶ branchen føres inn i main ──▶ Fullført
-                                                          egen branch, bygg og tester grønne     review-kommentarer → agenten fikser
+                                              │     visuell endring → skisse i Figma («🤖 Skisser») → må godkjennes
+                                              ▼
+                                            Klar ──▶ Under utvikling ──(alt grønt)──▶ Til gjennomgang ──(GODKJENT)──▶ main ──▶ Fullført
+                                                     (egen branch)   ◀──(ENDRINGER: agenten fikser)──┘
 ```
 
-## Slik fungerer det
+Samme kode kan kobles til hvilket som helst board, repo, Figma-fil og Slack-kanal, og flere PC-er kan kjøre den mot de samme systemene samtidig. Se [Koble til dine systemer](#koble-til-dine-systemer) og [Flere instanser](#flere-instanser).
 
-| Fil | Jobb |
-|---|---|
-| [refine.py](refine.py) | Inngangen: løkka som venter på boardet og starter, fortsetter eller forker én Claude-økt per oppgave |
-| [refiner/](refiner/) | Koden bak løkka: `board.py` (Notion API), `jobs.py` (hva som skal skje neste, og meldingen til agenten), `claude.py` (starte en økt og vise den), `sessions.py` (`.cache/sessions.json`), `code.py` (git-synk), `config.py` (refiner.toml og regelfilene i systemprompten), `display.py` (terminalvisningen) |
-| [refiner.toml](refiner.toml) | Innstillinger: boardsiden, GitHub-repo og branch, og Figma-fila |
-| [board.md](board.md) | Navn på egenskaper og statuser, hvem som kan redigere hva, og grenser |
-| [/sync-code](.claude/skills/sync-code/SKILL.md) | Kloner eller oppdaterer en skrivebeskyttet kopi av GitHub-repoet i `.cache/code` med din git-innlogging (eller bruker en lokal mappe) |
-| [/refine-board](.claude/skills/refine-board/SKILL.md) | Én runde: vokter skrivebeskyttede oppgaver, slipper inn nye, raffinerer nye og besvarte oppgaver, og lukker paraplyer |
-| [/refine-ticket](.claude/skills/refine-ticket/SKILL.md) | Leser oppgaven, kommentarene, Figma-framene og koden. Skriver `🤖 Raffinering`-seksjonen, setter tagger, størrelse, Figma-lenke og status, og stiller spørsmål som kommentarer |
-| [/split-ticket](.claude/skills/split-ticket/SKILL.md) | Deler en L- eller XL-oppgave opp i 2 til 6 oppgaver med én endring hver |
-| [notion-write](.claude/skills/notion-write/SKILL.md) | Hvordan hver endring i Notion gjøres via API-et: flytte oppgaver mellom kolonner, egenskaper, Raffinering-seksjonen, kommentarer og nye oppgaver |
-| [sources.md](sources.md) | Hvordan agenten leser koden, følger Figma-lenker og bygger inn frames i oppgaver |
-| [.claude/settings.json](.claude/settings.json) | Alle verktøyene agenten får bruke, også de fire nøyaktige git-kommandoene. Alt annet avvises når den kjører uten innblanding |
-| [.mcp.json](.mcp.json) | Kjører Notions offisielle MCP-server (`@notionhq/notion-mcp-server`) med `NOTION_API_KEY` fra `.env` |
+## Koble til dine systemer
+
+Alt som er unikt for et oppsett, er **miljøvariabler**. De leses fra miljøet først, og så fra `.env` (eller fila du velger med `--env`). [refiner.toml](refiner.toml) har bare oppførselen (modeller, parallelitet, gjennomgang …), som er lik for alle og kan committes. `.env` committes aldri.
+
+| Variabel | Påkrevd | Hva |
+|---|---|---|
+| `NOTION_API_KEY` | ja | Nøkkel til en Notion-integrasjon (hemmelig) |
+| `NOTION_BOARD` | ja | URL til Notion-siden med oppgaveboardet |
+| `GITHUB_REPO` | ja* | URL til produktets repo. Git bruker din egen innlogging, ingen nøkkel |
+| `GITHUB_BRANCH` | | Branchen det bygges mot (standard `main`) |
+| `CODE_LOCAL` | ja* | Les en lokal mappe i stedet for GitHub (bare raffinering) |
+| `FIGMA_FILE` | | Produktets Figma-fil. Agenten blar i den og tegner skisser der |
+| `FIGMA_TOKEN` | | Personlig Figma-nøkkel, så frames postes som bilder i Slack (hemmelig) |
+| `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | | Slack-appen (hemmelige). Uten dem kjører den uten Slack |
+| `SLACK_CHANNEL` | med Slack | Kanal-ID-en broen bruker |
+| `SLACK_TEST_OWNER` | | Bare for testing: Notion-bruker-ID som blir Eier på alt fra `/new` |
+| `INSTANCE_NAME` | | Navnet andre instanser ser. Standard er PC-navnet |
+
+\* Én av `GITHUB_REPO` og `CODE_LOCAL`.
+
+### Steg for steg
+
+1. **Claude Code.** Installer [Claude Code](https://code.claude.com) og logg inn med claude.ai-kontoen som har Figma-koblingen (og Notion-koblingen, som brukes til lesing).
+2. **Env-fila.** `cp .env.example .env` og fyll inn verdiene under. Sjekk når som helst med `python3 refine.py --oppsett`, som viser hva instansen er koblet til, uten å vise hemmelighetene.
+3. **Notion.**
+   - Lag en integrasjon på [notion.so/profile/integrations](https://www.notion.so/profile/integrations) med *read content*, *update content*, *insert content*, *read comments*, *insert comments* og *read user information including email addresses*. Nøkkelen er `NOTION_API_KEY`.
+   - Legg integrasjonen til på boardsiden: **••• → Connections**. Flyttes siden senere, må den kanskje legges til på nytt (ellers 404).
+   - `NOTION_BOARD` er URL-en til siden med boardet. Boardet må ha egenskapene og statusene i [board.md](board.md). refine.py sjekker det ved oppstart og sier nøyaktig hva som mangler. Egenskapene `Agent` og `Slack-tråd`, som refine.py bruker til å koordinere, lages av seg selv.
+4. **GitHub.** Sett `GITHUB_REPO` og eventuelt `GITHUB_BRANCH`. Sjekk at `git clone <repo>` virker i terminalen, for refine.py bruker den samme innloggingen. Den må kunne pushe til branchen, fordi godkjente endringer føres rett inn i den.
+5. **Figma (valgfritt).** Sett `FIGMA_FILE` til produktets fil. Claude Code-kontoen din må kunne redigere den, for skisser tegnes på siden «🤖 Skisser». Skru av skisser med `sketches = false` under `[design]` i refiner.toml.
+6. **Slack (valgfritt).** Se [Slack](#slack) under.
+7. **Start:** `python3 refine.py`.
+
+## Flere instanser
+
+Flere PC-er kan kjøre refine.py mot det samme boardet, repoet og Figma-fila samtidig. De ser hverandre og fordeler oppgavene mellom seg. Stopper én, tar de andre over der den slapp.
+
+- **Låser i Notion.** Før en agent starter, skriver instansen seg inn i egenskapen `Agent`, for eksempel `magnus-mbp · jobber · 2026-10-26T12:10:00Z · a1b2c3`. Den venter så noen sekunder og leser igjen, og bare den som står der da, får oppgaven. Mens agenten jobber, fornyes låsen hvert 3. minutt. Andre instanser rører ikke en oppgave med en levende lås.
+- **Krasj og lukket lokk.** Fornyes ikke låsen, utløper den etter `lease_minutes` (standard 10), og en annen instans tar over. Stopper du med Ctrl-C (eller lukker terminalen), stopper agentene, og oppgavene merkes `ledig`, så andre tar over med en gang.
+- **Hjemmet får første sjanse.** Når en oppgave hviler (venter på svar eller utvikling), står den fortsatt som instansens (`hviler`). Den instansen har økta med alt som er lest, så den svarer billigst. Har den ikke tatt svaret innen `takeover_minutes` (standard 5), tar en annen instans over og leser alt fra Notion.
+- **Agendaen leses fra boardet.** Hver kolonne har én ting som skal skje når ingen agent jobber på oppgaven, og den leses fra Notion, ikke fra minnet til én PC ([refiner/scheduler.py](refiner/scheduler.py)). Ingen oppgave blir derfor liggende fordi en instans stoppet midt i:
+
+  | Kolonne | Når ingen agent jobber på den |
+  |---|---|
+  | Innboks (Klar for pipeline) | raffiner, eller fjern haken hvis den ikke har nøyaktig én Eier |
+  | Raffinering | fortsett raffineringen |
+  | Trenger avklaring | vent; fortsett når et menneske svarer |
+  | Klar | bygg, når alt den er Blokkert av, er Fullført |
+  | Under utvikling | fortsett utviklingen fra branchen på GitHub (eller vent hvis den har et Blokkeringsnotat) |
+  | Til gjennomgang | gjennomgå og før inn i main |
+  | paraplyer | Klar når alle delene er Klar, Fullført når alle er Fullført |
+
+- **Branchen deles.** Etter hver utviklingsrunde, og mens agenten jobber, pusher refine.py oppgavens branch (`refiner/<tittel>-<id>`) til GitHub. En annen instans som tar over, fortsetter fra de commitene. Branchen slettes når oppgaven er i main.
+- **Main tåler at flere pusher.** Har en annen instans pushet til main i mellomtiden, avvises pushen. Da legges branchen oppå på nytt og pushes igjen. Gir det konflikt, går oppgaven tilbake til Under utvikling, og agenten løser konflikten.
+- **Felles teller for rydding.** Hver commit som går inn i main, får en trailer (`Refiner-oppgave: <Notion-URL>`), så alle instansene teller oppgavene siden siste rydding fra main. Bare én instans rydder om gangen (en lås-ref på GitHub, `refiner/laas-rydding`).
+- **Slack.** Tråden står i `Slack-tråd` i Notion, og bare instansen som har oppgaven, speiler til den. Hver melding broen poster, har metadata om hva den speiler, så en instans som tar over, ser hva som allerede står i tråden. Svar i tråden kan tas imot av hvilken som helst instans, fordi de bare blir kommentarer i Notion.
+- **Agentene vet om hverandre.** Hver økt får vite hvilke andre oppgaver som er i arbeid og hvor, og reglene i [sources.md](sources.md) sier at de ikke skal røre andres oppgaver eller brancher.
+- **Flere instanser på én PC.** Bruk én env-fil per instans: `python3 refine.py --env .env.kunde-a`. Hver får sin egen tilstand (`.cache/kunde-a/`) og sine egne arbeidskopier.
+
+Det som bare finnes lokalt, er Claude-øktene (`~/.claude/projects`) og `.cache/sessions.json` (hvilken økt hører til hvilken oppgave, og kostnaden). Mistes de, starter oppgaven på nytt fra det som står i Notion og på GitHub.
+
+## Slik fungerer det
 
 - **Port:** en oppgave kommer inn bare når `Klar for pipeline` er huket av og `Eier` er nøyaktig én person. Er boksen huket av uten eier, fjerner agenten haken og sier hvorfor.
 - **Eierlås:** når pipelinen har startet, kan eieren ikke endres. Agenten setter den tilbake hvis noen endrer den.
 - **Forfatterens tekst røres aldri.** Agenten skriver bare sin egen `🤖 Raffinering`-seksjon nederst på siden, og erstatter den seksjonen i senere runder.
-- **Spørsmål er kommentarer.** Alle sidekommentarer havner i samme tråd i Notion (API-et kan ikke svare i en egen tråd), så agenten samler nye spørsmål i én kommentar per runde (`🤖 S3: … Uten svar antar jeg …`), og svarer i én kommentar (`🤖 Svar på S1–S3: …`). Svar nederst på siden eller i Slack-tråden. Det plukkes opp innen 20 sekunder. Kommentarer på enkeltlinjer i teksten virker også, men sjekkes bare hvert 10. minutt, fordi API-et må spørres blokk for blokk. Alt agenten skriver, starter med 🤖.
-- **Skrivebeskyttede kolonner:** folk redigerer i Innboks og Trenger avklaring. Raffinering og Klar er bare for kommentarer. Notion kan ikke styre tilgang etter status, så agenten ruller tilbake endringer i status og egenskaper der ved hver runde. Endringer i brødteksten kan den bare flagge, ikke angre.
-- **Én økt per oppgave:** `python3 refine.py` holder seg oppe og spinner. Den sjekker boardet hvert 20. sekund via Notion API, uten Claude og nesten gratis. Når en oppgave i Innboks har Klar for pipeline og én Eier, starter den en Claude-økt for den oppgaven. Økta leser Notion, Figma og koden, og stopper av seg selv når oppgaven er **Klar** (da er økta ferdig) eller **Trenger avklaring**. Mens den venter på svar, kjører ingenting, så det koster ingen tokens. Når eieren kommenterer eller endrer oppgaven, fortsetter løkka **den samme økta** (`--resume`), med alt den har lest fra før. Den trenger altså ikke å lese Figma og koden på nytt. Oppgaver som deles opp, får hver sin økt, som starter med morens kontekst (`--fork-session`). Øktene ligger i `.cache/sessions.json`, så de overlever at du stopper og starter refine.py.
-- **Flere agenter samtidig:** hver oppgave får sin egen agent, og opptil `parallel` (standard 3, under `[agent]` i refiner.toml) jobber samtidig. Løkka fortsetter å sjekke boardet og speile Slack mens de jobber, og starter neste oppgave så snart en agent er ferdig. Hver linje i terminalen er merket med oppgaven, for eksempel `[Del 2] …`. Samme oppgave får aldri to agenter samtidig, og en del fra en oppdeling venter til morens økt er ferdig, så den får med seg hele konteksten.
-- **Billig i drift:** økta kjører på Sonnet 5.5 med `effort = "medium"` (endres i `[agent]` i refiner.toml). Regelfilene sendes i den bufrede systemprompten. Kodesynken, sjekken av boardet, egenskapene og kommentarene gjør Python, så agenten ikke bruker steg på det. En økt som skal hvile, komprimeres med `/compact` bare når den er stor (`compact_at`, standard 60 000 tokens per steg). Ellers koster komprimeringen mer enn den sparer.
-- **Kostnaden måles per kall:** Claude Code oppgir hva *hele økta* har kostet, også ved fortsettelser og forker. refine.py trekker derfor fra det økta hadde kostet før, så hvert kall bare telles én gang. Hvert kall skrives til `.cache/runs.jsonl` (oppgave, slags kall, økt, kostnad, øktas total, steg, sekunder og tokens per steg), og summen per oppgave står i `.cache/sessions.json`. Tall fra før denne rettelsen var for høye, fordi totalene ble lagt sammen. De ligger nå i `cost_before_fix`.
-- **Feil og omforsøk:** feiler en økt, venter løkka 1, 5 og så 15 minutter før neste forsøk. Etter tre feil på rad lar den oppgaven være til et menneske kommenterer eller endrer den. Bare én refine.py kan kjøre om gangen (`.cache/refine.lock`), så to prosesser kan ikke ta samme oppgave.
-- **Språk:** alt agenten skriver i Notion og i terminalen, er på norsk (bokmål). Navn på statuser, egenskaper og tagger er som på boardet.
+- **Spørsmål er kommentarer.** Agenten samler nye spørsmål i én kommentar per runde (`🤖 S3: … Uten svar antar jeg …`). Svar nederst på siden eller i Slack-tråden. Det plukkes opp innen 20 sekunder. Kommentarer på enkeltlinjer sjekkes hvert 10. minutt. Alt agenten skriver, starter med 🤖.
+- **Skrivebeskyttede kolonner:** folk redigerer i Innboks og Trenger avklaring. Resten er bare for kommentarer. Agenten ruller tilbake endringer i status og egenskaper der.
+- **Én økt per oppgave:** når eieren svarer, fortsetter løkka **den samme økta** (`--resume`), med alt den har lest fra før. Oppgaver som deles opp, får hver sin økt med morens kontekst (`--fork-session`). Mens den venter, kjører ingenting, så det koster ingen tokens.
+- **Flere agenter samtidig:** opptil `parallel` agenter (under `[agent]` i refiner.toml) per instans. Hver linje i terminalen er merket med oppgaven.
+- **Skisser:** ved visuelle endringer uten et godkjent design tegner raffineringsagenten en skisse på siden «🤖 Skisser» ([/sketch-figma](.claude/skills/sketch-figma/SKILL.md)). Oppgaven blir ikke Klar før eieren har godkjent den.
+- **Utvikling:** Klar-oppgaver bygges av [/develop-ticket](.claude/skills/develop-ticket/SKILL.md) i en egen klone i `.cache/work/`, på en egen branch. Agenten kan committe, slette og flytte filer (`git -C … rm|mv`), men aldri pushe. Når alt er grønt, skriver den en rapport.
+- **Gjennomgang før main:** oppgaven flyttes til **Til gjennomgang**, og en egen agent ([/review-change](.claude/skills/review-change/SKILL.md)) gjennomgår endringen i en ny økt. Bare `GODKJENT` slipper inn i main. Ved `ENDRINGER` går oppgaven tilbake til Under utvikling mens utviklingsøkta fikser funnene. Etter `review_rounds` runder uten godkjenning går den til eieren.
+- **Inn i main:** Python legger branchen oppå siste main og pusher. Oppgaven blir Fullført, `Pull request` får lenken til commiten, og rapporten blir en kommentar.
+- **Agentnotater:** designvalg og advarsler skrives i `docs/agents/` i produktrepoet, og ryddes av [/tidy-notes](.claude/skills/tidy-notes/SKILL.md) etter hver `tidy_every`-te oppgave i main.
+- **Feil og omforsøk:** feiler en økt, venter instansen 1, 5 og så 15 minutter. Etter tre feil på rad merkes oppgaven `feilet` i `Agent`, og eieren får en kommentar. Ingen instans prøver igjen før et menneske kommenterer eller endrer oppgaven.
+- **Kostnad:** Sonnet 5.5 med `effort = "medium"` som standard. Hvert kall skrives til `.cache/runs.jsonl`, og summen per oppgave står i `.cache/sessions.json`.
+- **Flere antakelser:** med `--antakelser` spør agentene bare om det som er absolutt kritisk, og antar resten.
 
-## Fra idé til PR
+## Slack
 
-- **Lese design og lage design er to ulike ting:** raffineringen *leser* Figma (`get_metadata`, `get_screenshot`) for å forstå skjermene, og *tegner* bare skisser på siden «🤖 Skisser» via /sketch-figma. Utviklingen *leser* Figma i detalj (`get_design_context`) for å bygge etter den godkjente skissen. Den tegner aldri i Figma.
-- **Skisser:** når en oppgave endrer noe visuelt og det ikke finnes et godkjent design, tegner raffineringsagenten en skisse i Figma-fila fra refiner.toml, på siden «🤖 Skisser» ([/sketch-figma](.claude/skills/sketch-figma/SKILL.md)). Skissen legges inn i oppgaven og i Slack-tråden, og oppgaven blir ikke Klar før eieren har godkjent den. Ber eieren om endringer, kommer en ny versjon (v2, v3 …) ved siden av den forrige. Skru av med `sketches = false` under `[design]`.
-- **Utvikling:** så snart en oppgave som løkka har raffinert, blir Klar, starter en utviklingsøkt ([/develop-ticket](.claude/skills/develop-ticket/SKILL.md)). Den er forket fra raffineringsøkta, så den husker koden og skissen. Den jobber i en egen klone i `.cache/work/<oppgave>/repo` på en egen branch, kjører prosjektets sjekker og committer. Når alt er grønt, skriver den en kort rapport. Da legger Python branchen oppå siste main og fører den rett inn i main med git-innloggingen din. Det lages ingen PR. Oppgaven blir Fullført, `Pull request` får lenken til commiten, og rapporten blir en kommentar i Notion og Slack. Agenten kan verken pushe eller merge selv. Har en annen oppgave endret de samme linjene i mellomtiden, vekkes agenten for å løse konflikten på branchen sin. Feiler bygg eller tester, pushes ingenting, og agenten spør i stedet. Oppgaver som er Blokkert av andre, venter til de er Fullført.
-- **Hele boardet ved oppstart:** `python3 refine.py` går gjennom alle kolonnene, ikke bare det løkka selv har startet. Oppgaver med «Klar for pipeline» som er laget, flyttet eller raffinert uten løkka, tas over: Raffinering og ubesvarte kommentarer i Trenger avklaring raffineres videre, og **Klar** og Under utvikling bygges. Oppgaver som står i Til gjennomgang fra den gamle PR-flyten, føres inn i main uten Claude, eldste PR først. Det løkka tar over, listes når den starter.
-- **Agentnotater i produktrepoet:** når utviklingsagenten tar et designvalg eller finner noe kritisk, skriver den et kort notat i `docs/agents/` (`beslutninger/` og `advarsler/`, med en indeks i `docs/agents/README.md`). Notatene følger koden inn i main. Alle agenter leser indeksen før de begynner, så de advarer hverandre og bygger videre på det andre har bestemt. Formatet står i [sources.md](sources.md).
-- **Kritisk gjennomgang før main:** når utviklingsagenten melder at den er ferdig, går en egen agent ([/review-change](.claude/skills/review-change/SKILL.md)) gjennom endringen i en ny økt. Den sjekker diffen mot main, akseptansekriteriene, testene og bygget (som den kjører selv), sikkerhet, omfang og notatene. Bare `GODKJENT` slipper inn i main. Ved `ENDRINGER` fikser utviklingsøkta funnene. Etter `review_rounds` runder (standard 2) uten godkjenning går oppgaven til eieren. Gjennomgangen kan lese og kjøre tester, men ikke endre kode.
-- **Automatisk opprydding:** etter hver `tidy_every`-te oppgave i main (standard 5) rydder en agent ([/tidy-notes](.claude/skills/tidy-notes/SKILL.md)) i `docs/agents`: slår sammen duplikater, fjerner det som ikke stemmer med koden lenger, og holder indeksen kort. Det går gjennom den samme gjennomgangen før main.
-- **Paraplyer lukkes av seg selv:** en oppgave som er delt i mindre deler, blir Fullført når alle delene er Fullført, uansett hvilken kolonne den står i. Det gjør Python, uten Claude. Paraplyer bygges aldri selv.
-- **Flere antakelser:** med `python3 refine.py --antakelser` spør agentene bare om det som er absolutt kritisk (sikkerhet, personvern, tap av data, noe som ikke kan angres, eller at de ikke kommer videre). Resten antar de, merket «(antatt)» under Antakelser. Skisser regnes som antatt godkjent.
-- **Tomt repo:** har repoet ingen brancher ennå, lager første utvikling `main` med en tom start-commit, så branchene har noe å bygge på.
+Med Slack kan du lage oppgaver med `/new <beskrivelse>` og snakke med oppgaven i en tråd. Det du svarer i tråden, blir en kommentar på oppgaven i Notion. Broen er [refiner/slack.py](refiner/slack.py), og den bruker ingen tokens. Flere instanser kan dele den samme Slack-appen.
 
-## Oppsett
-
-1. Installer [Claude Code](https://code.claude.com) og logg inn med claude.ai-kontoen som har Notion- og Figma-koblingene.
-2. Fyll ut [refiner.toml](refiner.toml): boardsiden, GitHub-repoet og branchen (eller en lokal mappe), og hovedfila i Figma.
-3. Kopier `.env.example` til `.env` og sett `NOTION_API_KEY`, en nøkkel til en Notion-integrasjon. Det er den eneste hemmeligheten. Integrasjonen må legges til under **Connections** på boardsiden, med tilgangene read content, update content, insert content, read comments og insert comments.
-
-Det trengs ingen GitHub-nøkkel. Før hver runde synker `/sync-code` en skrivebeskyttet kopi av repoet til `.cache/code` med din egen git-innlogging, den samme som `git clone` bruker, og Claude søker i den kopien. Figma leses via claude.ai-koblingen til Figma, som du allerede er logget inn på.
-
-## Slack (valgfritt)
-
-Med Slack kan du lage oppgaver med `/new <beskrivelse>` og snakke med oppgaven i en tråd. Agentens spørsmål, statusendringer og Figma-frames kommer i tråden, og det du svarer i tråden, blir en kommentar på oppgaven i Notion. Boardet er fortsatt kilden til sannhet, og agenten jobber bare mot Notion. Broen er [refiner/slack.py](refiner/slack.py), og den bruker ingen tokens.
-
-1. **Lag appen.** Gå til [api.slack.com/apps](https://api.slack.com/apps) → *Create New App* → *From an app manifest*, velg arbeidsområdet og lim inn [slack-manifest.yml](slack-manifest.yml). Den setter opp `/new`, Socket Mode (ingen offentlig URL nødvendig), hendelsene for svar i tråder og tilgangene. I arbeidsområder som krever godkjenning, må en Slack-admin godkjenne appen.
-2. **Installer den.** *Install App* → *Install to Workspace*. Kopier *Bot User OAuth Token* (`xoxb-…`) til `.env` som `SLACK_BOT_TOKEN`.
-3. **Lag en app-nøkkel for Socket Mode.** *Basic Information* → *App-Level Tokens* → *Generate Token and Scopes*, med scopen `connections:write`. Kopier nøkkelen (`xapp-…`) til `.env` som `SLACK_APP_TOKEN`.
-4. **La Notion-integrasjonen lese e-post.** På integrasjonen (notion.so/profile/integrations) skrur du på *Read user information including email addresses*. Slik finner `/new` riktig Eier: den som skriver kommandoen, må ha samme e-post i Slack og Notion.
-5. **Installer Slack-biblioteket** i et virtuelt miljø:
-   ```sh
-   python3 -m venv .venv
-   .venv/bin/pip install -r requirements.txt
-   ```
-   Etterpå starter du som vanlig med `python3 refine.py`. Finnes `.venv`, starter refine.py seg selv på nytt i det miljøet.
-6. **Velg kanalen.** Broen bruker én kanal. Inviter boten dit med `/invite @Raffineringsagent`, og sett kanal-ID-en som `channel` under `[slack]` i refiner.toml. ID-en står nederst i kanalens detaljer.
-7. **Bruk den.** Skriv `/new Vis åpningstidene i footeren på mobil` i den kanalen. `/new` i andre kanaler gir bare et svar om hvor den skal brukes, og meldinger i andre kanaler ignoreres. Alle oppgaver får sin tråd i kanalen, også de som lages direkte i Notion.
-
-Valgfritt:
-- **Figma som bilder:** med `FIGMA_TOKEN` (en personlig nøkkel fra Figma) i `.env` lastes framene opp som bilder i tråden. Uten den postes de som lenker, og Slack viser forhåndsvisning hvis Figma-appen er installert i Slack.
+1. **Lag appen.** [api.slack.com/apps](https://api.slack.com/apps) → *Create New App* → *From an app manifest*, og lim inn [slack-manifest.yml](slack-manifest.yml).
+2. **Installer den.** *Install App* → *Install to Workspace*. *Bot User OAuth Token* (`xoxb-…`) er `SLACK_BOT_TOKEN`.
+3. **App-nøkkel for Socket Mode.** *Basic Information* → *App-Level Tokens*, med scopen `connections:write`. Nøkkelen (`xapp-…`) er `SLACK_APP_TOKEN`.
+4. **Kanalen.** Inviter boten med `/invite @Raffineringsagent`, og sett kanal-ID-en (nederst i kanalens detaljer) som `SLACK_CHANNEL`.
+5. **Eier fra e-post.** `/new` finner Eier ut fra e-posten i Slack, så den må være lik i Notion (integrasjonen må kunne lese e-post).
+6. **Slack-biblioteket:** `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`. refine.py starter seg selv i `.venv` når den finnes.
 
 ## Bruk
 
 ```sh
-python3 refine.py              # start løkka, og la den stå (Ctrl-C stopper, øktene er lagret)
-python3 refine.py --verbose    # skriv også ut hele inndata og svar for hvert verktøykall
-python3 refine.py --antakelser # agentene antar mer og spør bare om det som er absolutt kritisk
+python3 refine.py                     # start løkka, og la den stå (Ctrl-C stopper og slipper oppgavene)
+python3 refine.py --oppsett           # vis hva instansen er koblet til
+python3 refine.py --env .env.kunde-a  # en instans til, med et annet oppsett
+python3 refine.py --verbose           # skriv også ut hele inndata og svar for hvert verktøykall
+python3 refine.py --antakelser        # agentene antar mer og spør bare om det som er absolutt kritisk
 
 # eller interaktivt
 claude
 /refine-board              # én runde, med hvert steg synlig
-/loop 2m /refine-board     # fortsett hvert andre minutt
 ```
 
-For å prøve: lag en oppgave, sett **Eier** og huk av **Klar for pipeline**. Når en spesifikasjon går glipp av noe en erfaren utvikler ville fanget opp, strammer du inn [definition-of-ready.md](.claude/skills/refine-ticket/definition-of-ready.md).
+For å prøve: lag en oppgave, sett **Eier** og huk av **Klar for pipeline**.
+
+## Videreutvikling
+
+Python-koden gjør alt som kan gjøres uten en språkmodell (lese boardet, låser, git, Slack). Claude gjør bare det som krever vurdering, styrt av skillene. Hold den delingen.
+
+| Fil | Ansvar |
+|---|---|
+| [refine.py](refine.py) | Inngangen: argumenter, hovedløkka, oppstart og ryddig stopp |
+| [refiner/config.py](refiner/config.py) | Oppførsel fra refiner.toml, oppsett for instansen fra miljøvariablene (`INSTANCE`, `ENV_VARS`), og regelfilene i systemprompten |
+| [refiner/board.py](refiner/board.py) | Notion API: snapshot av boardet, kommentarer, egenskaper. Kolonnenavnene står øverst |
+| [refiner/scheduler.py](refiner/scheduler.py) | Hva som skal skje neste, per kolonne. Ingen Claude, bare regler |
+| [refiner/lease.py](refiner/lease.py) | Låsene i `Agent`, som lar flere instanser dele boardet |
+| [refiner/runner.py](refiner/runner.py) | Kjører én jobb: tar låsen, bygger meldingen til agenten, starter eller fortsetter riktig økt |
+| [refiner/shipping.py](refiner/shipping.py) | Gjennomgang, rettelser og push til main, og ryddingen i agentnotatene |
+| [refiner/code.py](refiner/code.py) | Git: lesekopien, arbeidskopier, delte brancher, push med nytt forsøk |
+| [refiner/claude.py](refiner/claude.py) | Starter `claude -p`, verktøytilgangene per økttype, og visningen av hvert steg |
+| [refiner/slack.py](refiner/slack.py) | Slack-broen |
+| [refiner/sessions.py](refiner/sessions.py) | Lokal tilstand: økter og kostnad |
+| [.claude/skills/](.claude/skills/) | Hva agentene gjør: refine-ticket, split-ticket, sketch-figma, develop-ticket, review-change, tidy-notes, notion-write, sync-code |
+| [board.md](board.md), [sources.md](sources.md) | Regler som lastes inn i hver økt: boardets navn og regler, og hvordan kode, Figma, nettet og andre agenter håndteres |
+| [.claude/settings.json](.claude/settings.json) | Verktøy alle økter får (og aldri får). Ekstra verktøy per økttype står i `MODES` i claude.py |
+
+Vanlige endringer:
+
+- **Ny innstilling for alle:** legg den i refiner.toml og les den med `AGENT.get(...)` der den brukes.
+- **Nytt oppsett per instans** (et nytt system å koble til): legg den til i `ENV_VARS` og `Instance` i config.py, og i .env.example og tabellen over. Skal agenten se den, kommer den med i `Instance.describe()`.
+- **Ny kolonne eller ny jobb:** legg kolonnenavnet øverst i board.py og i board.md, og en regel i `next_jobs` i scheduler.py. Jobber uten Claude legges i `PYTHON_KINDS` og `python_job` i runner.py. Jobber med Claude får en melding i `claude_job`. Sjekk at kolonnen har en regel for når ingen agent jobber på den, så ingenting blir liggende.
+- **Nytt verktøy for agenten:** i `MODES` i claude.py (bare én økttype) eller i .claude/settings.json (alle). Agentene kjører uten noen som kan godkjenne, så alt som ikke er tillatt, avvises.
+- **Endre hva agenten gjør:** endre skillen, ikke Python-koden.

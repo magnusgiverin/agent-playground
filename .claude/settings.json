@@ -3,6 +3,7 @@
     "allow": [
       "Skill",
       "Read",
+      "Bash(python3 refine.py --oppsett)",
       "Glob",
       "Grep",
       "Bash(git clone --depth 1 --single-branch --branch * .cache/code/*)",
@@ -35,6 +36,7 @@
     ],
     "deny": [
       "Read(./.env)",
+      "Read(./.env.*)",
       "mcp__notion-api__API-update-a-data-source",
       "mcp__notion-api__API-create-a-data-source",
       "mcp__notion-api__API-delete-a-block",

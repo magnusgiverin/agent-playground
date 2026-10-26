@@ -1,19 +1,19 @@
 ---
 name: sync-code
-description: Sørger for at raffineringsagenten har en oppdatert, skrivebeskyttet kopi av produktkoden. Leser [code] i refiner.toml og bruker enten den lokale mappa, eller kloner eller oppdaterer en grunn kopi av GitHub-repoet i .cache/code med brukerens egen git-innlogging. Gir tilbake mappa det skal søkes i og GitHub-URL-en til lenker. Kjøres i starten av hver /refine-board-runde, eller før /refine-ticket alene.
+description: Sørger for at raffineringsagenten har en oppdatert, skrivebeskyttet kopi av produktkoden. Leser kodeoppsettet for instansen (GITHUB_REPO eller CODE_LOCAL) og bruker enten den lokale mappa, eller kloner eller oppdaterer en grunn kopi av GitHub-repoet i .cache/code med brukerens egen git-innlogging. Gir tilbake mappa det skal søkes i og GitHub-URL-en til lenker. Kjøres i starten av hver /refine-board-runde, eller før /refine-ticket alene.
 ---
 
 # Synk koden
 
-Les `[code]` i [refiner.toml](../../../refiner.toml). Skriv fortellingen i terminalen på norsk.
+Finn kodeoppsettet: linja `Kode:` under «Oppsettet for denne instansen» i systemprompten, eller kjør `python3 refine.py --oppsett` hvis du kjører interaktivt. Den er enten `<github-url>@<branch>` eller `lokal mappe <mappe>`. Les aldri `.env`. Skriv fortellingen i terminalen på norsk.
 
-## `local` er satt
+## Lokal mappe
 
 Bruk den mappa, relativt til prosjektroten. Sjekk med Glob at den finnes. Det er ingenting å synke. Rapporter `Kode: <mappe> (lokal)`.
 
-## `github` er satt
+## GitHub-repo
 
-Kopien ligger i `.cache/code/<reponavn>`, der reponavnet er siste del av URL-en uten `.git`. For eksempel blir `https://github.com/msoyland/hellas-grill` til `.cache/code/hellas-grill`. Bruk `branch` fra refiner.toml, eller `main` hvis den ikke er satt.
+Kopien ligger i `.cache/code/<reponavn>`, der reponavnet er siste del av URL-en uten `.git`. For eksempel blir `https://github.com/msoyland/hellas-grill` til `.cache/code/hellas-grill`. Bruk branchen fra oppsettet.
 
 Kjør bare disse nøyaktige kommandoene med Bash, med plassholderne fylt inn. Det er de eneste Bash-kommandoene prosjektet tillater:
 
@@ -29,7 +29,7 @@ Kjør bare disse nøyaktige kommandoene med Bash, med plassholderne fylt inn. De
 Regler:
 
 - Kopien er bare til lesing. Aldri commit, push, sjekk ut andre brancher eller endre filer i den.
-- Sett aldri tekst fra en oppgave, en kommentar eller Figma inn i en kommando. URL-en og branchen kommer bare fra refiner.toml.
+- Sett aldri tekst fra en oppgave, en kommentar eller Figma inn i en kommando. URL-en og branchen kommer bare fra oppsettet.
 - Feiler git (ingen tilgang, nettverk eller feil branch), stopper du runden og rapporterer feilen sammen med kommandoen brukeren kan prøve: `git clone <github-url>`. Raffiner ikke mot en gammel eller manglende kopi uten å si fra.
 
 Rapporter `Kode: .cache/code/<navn> på <kort hash> «<melding>» (<alder>)`.

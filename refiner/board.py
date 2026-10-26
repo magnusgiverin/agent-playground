@@ -3,18 +3,29 @@
 import json
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime
 
-from .config import CONFIG, env
+from .config import INSTANCE, env
 
-INBOX = {"Innboks", None}  # tom status regnes som Innboks
-DONE = {"Klar", "Under utvikling", "Til gjennomgang", "Fullført"}  # Klar eller lenger (Til gjennomgang brukes ikke lenger, men tåles)
+# Kolonnene på boardet, i rekkefølge. Navnene må stemme med board.md.
+INNBOKS, RAFFINERING, AVKLARING, KLAR = "Innboks", "Raffinering", "Trenger avklaring", "Klar"
+UTVIKLING, GJENNOMGANG, FULLFORT = "Under utvikling", "Til gjennomgang", "Fullført"
+INBOX = {INNBOKS, None}  # tom status regnes som Innboks
+DONE = {KLAR, UTVIKLING, GJENNOMGANG, FULLFORT}  # Klar eller lenger
 NETWORK_ERRORS = (urllib.error.URLError, TimeoutError, KeyError, ValueError)
 REQUIRED_PROPERTIES = ["Oppgave", "Status", "Etiketter", "Størrelse", "Figma-lenke", "Blokkeringsnotat",
                        "Blokkert av", "Blokkerer", "Klar for pipeline", "Eier", "Pull request"]
-REQUIRED_STATUSES = ["Innboks", "Raffinering", "Trenger avklaring", "Klar", "Under utvikling", "Fullført"]
+REQUIRED_STATUSES = [INNBOKS, RAFFINERING, AVKLARING, KLAR, UTVIKLING, GJENNOMGANG, FULLFORT]
+# Egenskaper som bare refine.py skriver, og som lages av seg selv hvis de mangler. Se lease.py og slack.py.
+MANAGED_PROPERTIES = {"Agent": {"rich_text": {}}, "Slack-tråd": {"url": {}}}
+
+
+def epoch(iso):
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp() if iso else 0.0
 
 
 class Board:
@@ -23,11 +34,16 @@ class Board:
     def __init__(self):
         self.key = env("NOTION_API_KEY")
         if not self.key:
-            sys.exit("Sett NOTION_API_KEY i .env (se .env.example)")
-        board = CONFIG["notion"]["board"]
-        page = re.search(r"[0-9a-f]{32}", board.replace("-", "")).group(0)
-        database = next(b["id"] for b in self.api("GET", f"blocks/{page}/children")["results"]
-                        if b["type"] == "child_database")
+            sys.exit("Sett NOTION_API_KEY (i miljøet eller i env-fila, se .env.example)")
+        match = re.search(r"[0-9a-f]{32}", INSTANCE.board.replace("-", ""))
+        if not match:
+            sys.exit("Sett NOTION_BOARD til URL-en til Notion-siden med boardet (se .env.example)")
+        try:
+            database = next(b["id"] for b in self.api("GET", f"blocks/{match.group(0)}/children")["results"]
+                            if b["type"] == "child_database")
+        except urllib.error.HTTPError as error:
+            sys.exit(f"Fikk ikke lest boardsiden ({error.code}). Legg integrasjonen til under ••• → Connections "
+                     "på boardsiden, og sjekk at NOTION_BOARD peker på den.")
         self.data_source = self.api("GET", f"databases/{database}")["data_sources"][0]["id"]
         # agentens egne endringer og kommentarer gjøres av integrasjonen, så de har denne bot-ID-en
         self.bot = self.api("GET", "users/me")["id"]
@@ -56,10 +72,13 @@ class Board:
 
     def snapshot(self):
         """Oppgavene agenten bryr seg om, med det som betyr noe for dem. Agentens egne endringer er utelatt."""
+        from .lease import parse  # lease.py bruker Board, så den importeres her
         tickets = {}
         query = {"filter": {"or": [{"property": "Klar for pipeline", "checkbox": {"equals": True}},
-                                   {"property": "Status", "status": {"equals": "Raffinering"}},
-                                   {"property": "Status", "status": {"equals": "Klar"}}]}}
+                                   {"property": "Status", "status": {"equals": RAFFINERING}},
+                                   {"property": "Status", "status": {"equals": KLAR}},
+                                   {"property": "Status", "status": {"equals": UTVIKLING}},
+                                   {"property": "Status", "status": {"equals": GJENNOMGANG}}]}}
         for page in self.pages(f"data_sources/{self.data_source}/query", query):
             props = page["properties"]
             status = (props["Status"]["status"] or {}).get("name")
@@ -76,6 +95,9 @@ class Board:
                 "figma": props["Figma-lenke"]["url"],
                 "blocker": "".join(t["plain_text"] for t in props["Blokkeringsnotat"]["rich_text"]),
                 "pr": props["Pull request"]["url"],
+                # hvilken instans som har oppgaven (lease.py), og Slack-tråden (slack.py); begge delt mellom instansene
+                "lease": parse("".join(t["plain_text"] for t in props["Agent"]["rich_text"])),
+                "slack_thread": props["Slack-tråd"]["url"],
                 # bare endringer gjort av et menneske, ikke av agenten
                 "edited": page["last_edited_time"] if page["last_edited_by"]["id"] != self.bot else None,
                 "comment": None,   # ID-en til siste kommentar fra et menneske
@@ -86,6 +108,9 @@ class Board:
                 ticket["all_comments"] = self.comments(page["id"])
                 ticket["comments"] = [(c["id"], c["text"]) for c in ticket["all_comments"] if c["human"]]
                 ticket["comment"] = ticket["comments"][-1][0] if ticket["comments"] else None
+            # siste gang et menneske gjorde noe (kommentar eller endring), til overtakelse mellom instanser
+            ticket["human_at"] = max([epoch(ticket["edited"])]
+                                     + [c["at"] for c in ticket["all_comments"] if c["human"]])
             tickets[page["id"]] = ticket
         return tickets
 
@@ -96,7 +121,7 @@ class Board:
             text = "".join(t.get("plain_text", "") for t in comment["rich_text"])
             author = comment["created_by"]["id"]
             from_agent = author == self.bot and not text.startswith("💬")
-            comments.append({"id": comment["id"], "author": author, "text": text,
+            comments.append({"id": comment["id"], "author": author, "text": text, "at": epoch(comment["created_time"]),
                              "human": not from_agent and not text.startswith("🤖")})
         return comments
 
@@ -154,6 +179,13 @@ class Board:
     def update(self, page_id, properties):
         self.api("PATCH", f"pages/{page_id}", {"properties": properties})
 
+    def move(self, page_id, status, **more):
+        """Flytter oppgaven til en kolonne, og setter eventuelt flere egenskaper samtidig."""
+        self.update(page_id, {"Status": {"status": {"name": status}}, **more})
+
+    def set_blocker(self, page_id, text):
+        self.update(page_id, {"Blokkeringsnotat": {"rich_text": [{"text": {"content": text}}] if text else []}})
+
     def comment(self, page_id, text):
         self.api("POST", "comments", {"parent": {"page_id": page_id}, "rich_text": [{"text": {"content": text[:2000]}}]})
 
@@ -161,8 +193,18 @@ class Board:
         return self.api("GET", f"pages/{page_id}/markdown").get("markdown", "")
 
     def check_schema(self):
-        """Stopper hvis boardet mangler noe fra board.md, så ingen økt bruker tokens på det."""
+        """Stopper hvis boardet mangler noe fra board.md, så ingen økt bruker tokens på det.
+        Egenskapene bare refine.py bruker (MANAGED_PROPERTIES), lages hvis de mangler."""
         schema = self.api("GET", f"data_sources/{self.data_source}")["properties"]
+        new = {name: kind for name, kind in MANAGED_PROPERTIES.items() if name not in schema}
+        if new:
+            try:
+                self.api("PATCH", f"data_sources/{self.data_source}", {"properties": new})
+                print(f"La til {', '.join(new)} på boardet. De brukes av refine.py til å koordinere instansene.")
+                schema.update(new)
+            except urllib.error.HTTPError as error:
+                sys.exit(f"Boardet mangler {', '.join(new)}, og integrasjonen fikk ikke lagt dem til ({error.code}). "
+                         "Legg dem til selv: Agent (tekst) og Slack-tråd (URL).")
         missing = [name for name in REQUIRED_PROPERTIES if name not in schema]
         statuses = {o["name"] for o in schema.get("Status", {}).get("status", {}).get("options", [])}
         missing += [f"status «{name}»" for name in REQUIRED_STATUSES if name not in statuses]
@@ -197,7 +239,6 @@ class InlineWatcher:
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
-        import time
         while True:
             time.sleep(self.every)
             for page_id in list(self.waiting):

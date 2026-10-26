@@ -5,20 +5,25 @@ oppgaven i Notion («💬 Navn (Slack): …»), og agenten jobber bare mot Notio
 så agentens kommentarer, statusendringer og Figma-frames tilbake til tråden. Ingenting her
 bruker Claude, så det koster ingen tokens.
 
+Flere instanser kan bruke den samme Slack-appen. Slack sender hver hendelse til én av dem, og
+alle skriver bare til Notion, så det spiller ingen rolle hvem som får den. Tråden til en oppgave
+står i egenskapen «Slack-tråd» i Notion, og bare instansen som har oppgaven (låsen i «Agent»),
+speiler til den. Hver melding i tråden har metadata om hva den speiler, så en instans som tar
+over, leser tråden og fortsetter uten å poste noe to ganger.
+
 Kjører med Socket Mode: appen kobler seg til Slack over en websocket, så den trenger ingen
-offentlig URL. Broen bruker bare én kanal: `channel` under [slack] i refiner.toml. Krever
-SLACK_BOT_TOKEN og SLACK_APP_TOKEN i .env (se README).
+offentlig URL. Krever SLACK_BOT_TOKEN, SLACK_APP_TOKEN og SLACK_CHANNEL (se README).
 """
 
 import json
-import queue
 import re
 import threading
 import urllib.parse
 import urllib.request
 
-from .board import DONE, INBOX, NETWORK_ERRORS
-from .config import SLACK, env
+from . import lease
+from .board import FULLFORT, INBOX, NETWORK_ERRORS
+from .config import INSTANCE, env
 from .display import say
 
 STATUS_MESSAGES = {
@@ -26,17 +31,26 @@ STATUS_MESSAGES = {
     "Trenger avklaring": "❓ Agenten trenger svar på spørsmålene over. Svar her i tråden, så går svaret rett til oppgaven.",
     "Klar": "✅ Da er oppgaven klar til utvikling. Utviklingsagenten plukker den opp snarest.",
     "Under utvikling": "🚧 Utviklingsagenten bygger oppgaven nå, på en egen branch.",
+    "Til gjennomgang": "🔎 Endringen er ferdig bygd og gjennomgås av en egen agent før den går inn i main.",
     "Fullført": "🎉 Ferdig! Branchen er ført inn i main. Lenken til commiten står over.",
 }
 QUESTION = re.compile(r"\bS\d+:")  # agentens spørsmål («🤖 S4: …»), så eieren nevnes
 FIGMA_EMBED = re.compile(r'<embed source="(https://www\.figma\.com/[^"]+)">([^<]*)</embed>')
+PERMALINK = re.compile(r"/archives/([A-Z0-9]+)/p(\d{10})(\d{6})")
+NOTION_PAGE = re.compile(r"notion\.(?:so|site|com)/[^|>\s]*?([0-9a-f]{32})")
+EVENT = "refiner"  # event_type i metadataen på meldingene broen poster
 
-
-CHANNEL = SLACK.get("channel", "")
+CHANNEL = INSTANCE.slack_channel or ""
 
 
 def enabled():
     return bool(env("SLACK_BOT_TOKEN") and env("SLACK_APP_TOKEN"))
+
+
+def thread_of(permalink):
+    """(kanal, ts) fra en Slack-permalenke, eller None."""
+    match = PERMALINK.search(permalink or "")
+    return (match.group(1), f"{match.group(2)}.{match.group(3)}") if match else None
 
 
 class Slack:
@@ -45,14 +59,16 @@ class Slack:
         from slack_bolt.adapter.socket_mode import SocketModeHandler
 
         if not CHANNEL:
-            raise ValueError("Sett channel under [slack] i refiner.toml til kanal-ID-en Slack-broen skal bruke.")
+            raise ValueError("Sett SLACK_CHANNEL til kanal-ID-en Slack-broen skal bruke.")
         self.board = board
         self.app = App(token=env("SLACK_BOT_TOKEN"))
         self.client = self.app.client
-        self.links = queue.Queue()      # nye tråder fra /new, som hovedløkka lagrer i sessions.json
         self.wake = threading.Event()   # settes når noen svarer, så løkka sjekker boardet med en gang
-        # tråd → oppgave, slik at svar i tråden finner riktig oppgave
-        self.threads = {e["slack"]["ts"]: id for id, e in state.items() if e.get("slack")}
+        self.threads = {}               # tråd-ts → oppgave-ID, så svar i tråden finner riktig oppgave
+        self.mirroring = set()          # oppgavene denne instansen speilet forrige runde
+        for id, entry in state.items():
+            if entry.get("slack"):
+                self.threads[entry["slack"]["ts"]] = id
         self.app.command("/new")(self.on_new)
         self.app.event("message")(self.on_message)
         SocketModeHandler(self.app, env("SLACK_APP_TOKEN")).connect()  # kjører i en egen tråd
@@ -70,8 +86,8 @@ class Slack:
             respond(f"Bruk /new i <#{CHANNEL}>, så havner oppgaven og tråden der.")
             return
         email = self.client.users_info(user=user)["user"]["profile"].get("email")
-        # under testing får alle oppgaver samme eier (test_owner i refiner.toml)
-        owner = SLACK.get("test_owner") or (self.board.user_by_email(email) if email else None)
+        # under testing får alle oppgaver samme eier (SLACK_TEST_OWNER)
+        owner = INSTANCE.test_owner or (self.board.user_by_email(email) if email else None)
         if not owner:
             respond(f"Fant ingen Notion-bruker med e-posten din ({email or 'ukjent'}). Oppgaven trenger en Eier i Notion, "
                     "så be om tilgang til arbeidsområdet, eller lag oppgaven i Notion i stedet.")
@@ -81,13 +97,13 @@ class Slack:
         root = self.post_to(CHANNEL, None, f"🆕 *{title}*\n<{url}|Åpne i Notion> · opprettet av <@{user}>\n"
                                            "Jeg legger spørsmål og status her i tråden. Svar her, så går svaret rett til oppgaven.")
         self.threads[root["ts"]] = page_id
-        self.links.put((page_id, {"channel": CHANNEL, "ts": root["ts"], "user": user}))
+        self.save_thread(page_id, root["ts"])  # instansen som tar oppgaven, finner tråden i Notion
         self.wake.set()
 
     def on_message(self, event):
         if event.get("channel") != CHANNEL or event.get("bot_id") or event.get("subtype") or not event.get("thread_ts"):
             return  # bare menneskers svar i tråder i kanalen vår
-        page_id = self.threads.get(event["thread_ts"])
+        page_id = self.page_for(event["thread_ts"])
         if not page_id:
             return
         try:
@@ -97,49 +113,102 @@ class Slack:
             self.post_to(event["channel"], event["thread_ts"], f"⚠️ Fikk ikke lagret svaret i Notion: {error}")
         self.wake.set()
 
+    def page_for(self, thread_ts):
+        """Oppgaven en tråd hører til. Tråden kan være laget av en annen instans, så lenken i rotmeldingen
+        brukes når vi ikke kjenner den fra før."""
+        if thread_ts not in self.threads:
+            try:
+                root = self.client.conversations_replies(channel=CHANNEL, ts=thread_ts, limit=1)["messages"][0]
+            except Exception:
+                return None
+            match = NOTION_PAGE.search(root.get("text", "")) if root.get("bot_id") else None
+            if not match:
+                return None
+            hex_id = match.group(1)
+            self.threads[thread_ts] = f"{hex_id[:8]}-{hex_id[8:12]}-{hex_id[12:16]}-{hex_id[16:20]}-{hex_id[20:]}"
+        return self.threads[thread_ts]
+
     # --- Notion → Slack ---------------------------------------------------------------
 
     def sync(self, snap, state):
-        """Lagrer nye tråder, lager tråder for oppgaver fra Notion, og speiler nytt til trådene."""
-        changed = False
-        while not self.links.empty():
-            page_id, link = self.links.get()
-            state.setdefault(page_id, {"title": snap.get(page_id, {}).get("title", "")})["slack"] = {**link, "posted": [], "status": None}
-            changed = True
+        """Speiler nytt til trådene for oppgavene denne instansen har, og lager tråder for dem som mangler."""
+        changed, now_mirroring = False, set()
         for id, ticket in snap.items():
-            entry = state.get(id, {})
-            # tråden lages så snart oppgaven er i pipelinen, før agenten starter, så ingenting går tapt
-            entering = ticket["ready"] and ticket["status"] in INBOX and len(ticket["owners"]) == 1
-            if not entry.get("slack") and (entry.get("session") or entering) and ticket["status"] not in DONE:
-                entry = state.setdefault(id, {"title": ticket["title"]})
-                try:
-                    self.open_thread(id, entry, ticket)
+            if not lease.mine(ticket.get("lease")):
+                continue  # en annen instans har oppgaven (eller ingen ennå): den speiler
+            entry = state.setdefault(id, {"title": ticket["title"]})
+            link = entry.get("slack")
+            try:
+                if ticket["slack_thread"] and id not in self.mirroring:
+                    # vi har (fått) oppgaven: les tråden, så vi vet hva som allerede er postet, også av andre instanser
+                    link = entry["slack"] = self.adopt(ticket["slack_thread"], link)
                     changed = True
-                except Exception as error:
-                    say(f"Slack: fikk ikke laget tråd for «{ticket['title']}»: {error}")
-                    continue
-            if entry.get("slack"):
-                try:
-                    changed |= self.mirror(id, entry["slack"], ticket)
-                except Exception as error:  # prøv igjen neste runde; det som ikke ble sendt, er ikke merket som sendt
-                    say(f"Slack: fikk ikke speilet «{ticket['title']}»: {error}")
+                elif not ticket["slack_thread"] and link:
+                    self.save_thread(id, link["ts"])  # tråd fra før trådene ble lagret i Notion
+                elif not ticket["slack_thread"] and ticket["status"] not in INBOX | {FULLFORT}:
+                    link = self.open_thread(id, entry, ticket)
                     changed = True
+            except Exception as error:
+                say(f"Slack: fikk ikke koblet tråden for «{ticket['title']}»: {error}")
+                continue
+            if not link:
+                continue
+            now_mirroring.add(id)
+            self.threads[link["ts"]] = id
+            try:
+                changed |= self.mirror(id, link, ticket)
+            except Exception as error:  # prøv igjen neste runde; det som ikke ble sendt, er ikke merket som sendt
+                say(f"Slack: fikk ikke speilet «{ticket['title']}»: {error}")
+                changed = True
+        self.mirroring = now_mirroring
         return changed
+
+    def adopt(self, permalink, link):
+        """Leser en eksisterende tråd: hvilke kommentarer, statuser og frames som allerede er postet."""
+        channel, ts = thread_of(permalink)
+        link = {"channel": channel, "ts": ts, "user": (link or {}).get("user"), "posted": list((link or {}).get("posted", [])),
+                "status": (link or {}).get("status"), "figma": list((link or {}).get("figma", []))}
+        cursor = None
+        while True:
+            page = self.client.conversations_replies(channel=channel, ts=ts, include_all_metadata=True, limit=200,
+                                                     **({"cursor": cursor} if cursor else {}))
+            for message in page["messages"]:
+                if message.get("bot_id") and message.get("files"):  # Figma-bilde: lenken står i teksten
+                    link["figma"] += [url for url in re.findall(r"<(https://www\.figma\.com/[^|>]+)", message.get("text", ""))
+                                      if url not in link["figma"]]
+                meta = message.get("metadata") or {}
+                if meta.get("event_type") != EVENT:
+                    continue
+                payload = meta.get("event_payload") or {}
+                if payload.get("comment") and payload["comment"] not in link["posted"]:
+                    link["posted"].append(payload["comment"])
+                if payload.get("status"):
+                    link["status"] = payload["status"]
+                if payload.get("figma") and payload["figma"] not in link["figma"]:
+                    link["figma"].append(payload["figma"])
+            cursor = (page.get("response_metadata") or {}).get("next_cursor")
+            if not cursor:
+                return link
 
     def open_thread(self, id, entry, ticket):
         """Tråd for en oppgave som ble laget direkte i Notion."""
         owner = self.slack_user(ticket["owners"][0]) if ticket["owners"] else None
         who = f"<@{owner}>" if owner else self.board.person(ticket["owners"][0])["name"] if ticket["owners"] else "ingen"
         root = self.post_to(CHANNEL, None, f"🆕 *{ticket['title']}*\n<{ticket['url']}|Åpne i Notion> · eier {who}\n"
-                                                    "Jeg legger spørsmål og status her i tråden. Svar her, så går svaret rett til oppgaven.")
+                                           "Jeg legger spørsmål og status her i tråden. Svar her, så går svaret rett til oppgaven.")
         # bare menneskers kommentarer fra før agenten tok oppgaven, regnes som sett; alt agenten har skrevet, postes
         before_agent = []
         for c in ticket["all_comments"]:
             if not c["human"]:
                 break
             before_agent.append(c["id"])
-        entry["slack"] = {"channel": CHANNEL, "ts": root["ts"], "user": owner, "posted": before_agent, "status": None}
-        self.threads[root["ts"]] = id
+        entry["slack"] = {"channel": CHANNEL, "ts": root["ts"], "user": owner, "posted": before_agent, "status": None, "figma": []}
+        self.save_thread(id, root["ts"])
+        return entry["slack"]
+
+    def save_thread(self, page_id, ts):
+        permalink = self.client.chat_getPermalink(channel=CHANNEL, message_ts=ts)["permalink"]
+        self.board.update(page_id, {"Slack-tråd": {"url": permalink}})
 
     def mirror(self, id, link, ticket):
         changed, agent_spoke = False, False
@@ -149,11 +218,12 @@ class Slack:
             if comment["text"].startswith("💬"):
                 pass  # kom fra Slack, står allerede i tråden
             elif comment["human"]:
-                self.post(link, f"📝 {self.board.person(comment['author'])['name']} i Notion: {comment['text']}")
+                self.post(link, f"📝 {self.board.person(comment['author'])['name']} i Notion: {comment['text']}",
+                          comment=comment["id"])
             else:
                 agent_spoke = True
                 mention = f" <@{link['user']}>" if link.get("user") and QUESTION.search(comment["text"]) else ""
-                self.post(link, comment["text"] + mention)
+                self.post(link, comment["text"] + mention, comment=comment["id"])
             link["posted"].append(comment["id"])  # først etter at den er sendt
             changed = True
         status_changed = ticket["status"] != link.get("status")
@@ -161,7 +231,7 @@ class Slack:
             self.post_figma(id, link, ticket)  # nye skisser og frames (de som er postet før, hoppes over)
         if status_changed:
             if ticket["status"] in STATUS_MESSAGES:
-                self.post(link, STATUS_MESSAGES[ticket["status"]])
+                self.post(link, STATUS_MESSAGES[ticket["status"]], status=ticket["status"])
             link["status"] = ticket["status"]
             changed = True
         return changed
@@ -185,16 +255,19 @@ class Slack:
                                             filename="figma.png", title=caption or "Figma",
                                             initial_comment=f"🎨 {caption or 'Figma'}: <{url}|åpne i Figma>")
             else:
-                self.post(link, f"🎨 <{url}|{caption or 'Figma-frame'}>")
+                self.post(link, f"🎨 <{url}|{caption or 'Figma-frame'}>", figma=url)
 
     # --- Hjelpere ---------------------------------------------------------------------
 
-    def post(self, link, text):
-        return self.post_to(link["channel"], link["ts"], text)
+    def post(self, link, text, **payload):
+        """Poster i tråden. payload (comment, status eller figma) blir metadata, så andre instanser ser hva som er postet."""
+        metadata = {"event_type": EVENT, "event_payload": payload} if payload else None
+        return self.post_to(link["channel"], link["ts"], text, metadata)
 
-    def post_to(self, channel, thread_ts, text):
+    def post_to(self, channel, thread_ts, text, metadata=None):
         try:
-            return self.client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text, unfurl_links=True)
+            return self.client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text, unfurl_links=True,
+                                                **({"metadata": metadata} if metadata else {}))
         except Exception as error:
             if "not_in_channel" in str(error):
                 raise RuntimeError(f"Boten er ikke med i kanalen {channel}. Inviter den: /invite @Raffineringsagent") from error
