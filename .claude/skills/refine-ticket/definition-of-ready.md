@@ -19,6 +19,15 @@ En oppgave er **Klar** bare når alt dette stemmer:
 - Er du i tvil, spør. Heller for mange spørsmål enn en feil spesifikasjon.
 - Når oppgaveteksten og den nyeste Figma-framen er uenige, spør hvilken som gjelder, og nevn begge.
 
+## Modus: flere antakelser
+
+Står det `Modus: flere antakelser` i meldingen fra refine.py, gjelder dette i stedet for «Spør eller anta?» over:
+
+- **Spør bare når et feil valg ville vært alvorlig og vanskelig å rette opp:** sikkerhet, personvern eller tap av data; noe som ikke kan angres (betaling, sletting, migrering, endringer i et offentlig API); en oppgave som sier imot seg selv, der tolkningene gir helt ulik løsning; eller at du ikke kommer videre i det hele tatt (mangler tilgang, nøkler eller en avgjørelse bare eieren kan ta).
+- **Alt annet antar du.** Velg det som passer best med koden, designet og resten av appen, og det som er lettest å endre senere. Skriv det under Antakelser, merket `(antatt)`, så eieren ser det.
+- **Skisser:** lag og legg fram skissen som vanlig, men vent ikke på godkjenning. Merk den `(antatt godkjent)` under Design og gå videre. Kommenterer eieren senere, tar du det med.
+- **Definisjonen av klar** gjelder ellers som vanlig. En oppgave med bare antakelser og ingen åpne spørsmål kan være Klar.
+
 ## Stil
 
 Vær kort, for utviklere skumleser. Ingen prosa, og ikke gjenta oppgaven. Skriv på norsk (bokmål).

@@ -46,7 +46,7 @@ Når du er ferdig, er oppgaven enten **Klar** (økta er da ferdig) eller **Treng
 - Kommentarene fra mennesker står i meldingen. Bruk `notion-get-comments` bare når du kjører uten refine.py.
 - Hent oppgavene i `Blokkert av` og `Blokkerer`, oppgaven den ble delt ut fra (hvis noen), og Notion-sider den lenker til.
 - **Design**: følg alle Figma-lenker slik [sources.md](../../../sources.md) beskriver, også lenker i lenkede sider og overordnede oppgaver. For UI-arbeid uten lenke blar du i Figma-fila fra refiner.toml, eller ber om en lenke.
-- **Kode**: finn koden oppgaven berører i mappa fra `code=`, slik sources.md beskriver. Ble du startet uten kodeargumenter, kjører du `/sync-code` først. List bare stier du faktisk har åpnet.
+- **Kode**: les først `docs/agents/README.md` i kodemappa og notatene som gjelder oppgaven (se «Agentnotater» i sources.md). Står det en advarsel eller en beslutning som påvirker oppgaven, tar du den med under Antakelser eller Avhengigheter. Finn så koden oppgaven berører i mappa fra `code=`, slik sources.md beskriver. Ble du startet uten kodeargumenter, kjører du `/sync-code` først. List bare stier du faktisk har åpnet.
 
 ### 2. Bestem om den skal deles opp
 
@@ -60,7 +60,7 @@ Hvert spørsmål går inn under `Åpne spørsmål` med en ID (`S1`, `S2` og så 
 
 ### 3b. Skisse ved visuelle endringer
 
-Endrer oppgaven noe brukeren ser (layout, komponenter, farger, tekster i UI), og det ikke finnes et godkjent design, kjører du `/sketch-figma` før du skriver seksjonen. Den tegner en skisse i Figma og gir deg en embed og et godkjenningsspørsmål. Skissen må være godkjent av eieren før oppgaven kan bli Klar. Er den ikke godkjent ennå, blir oppgaven stående i Trenger avklaring, også når alle andre spørsmål er besvart. Når eieren svarer på skissen, er det `/sketch-figma` steg 5 som gjelder.
+Endrer oppgaven noe brukeren ser (layout, komponenter, farger, tekster i UI), og det ikke finnes et godkjent design, kjører du `/sketch-figma` før du skriver seksjonen. Den tegner en skisse i Figma og gir deg en embed og et godkjenningsspørsmål. Skissen må være godkjent av eieren før oppgaven kan bli Klar. Er den ikke godkjent ennå, blir oppgaven stående i Trenger avklaring, også når alle andre spørsmål er besvart. Unntaket er `Modus: flere antakelser`: da regnes skissen som antatt godkjent (se /sketch-figma steg 4b). Når eieren svarer på skissen, er det `/sketch-figma` steg 5 som gjelder.
 
 Står `sketches = false` under `[design]` i refiner.toml, hopper du over dette steget og krever en lenket Figma-frame i stedet, slik definisjonen av klar sier.
 

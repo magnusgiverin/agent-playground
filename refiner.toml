@@ -10,7 +10,14 @@ effort = "medium"
 dev_model = "claude-sonnet-5-5"
 # Hvor mange agenter som kan jobbe samtidig, på hver sin oppgave. Høyere går fortere, men koster
 # mer per minutt og gir flere samtidige kall mot Notion (som har en grense på ca. 3 kall i sekundet).
-parallel = 3
+parallel = 10
+# Gjennomgangen før main er det siste som stopper feil, så den får høyere innsats.
+review_model = "claude-sonnet-5-5"
+review_effort = "high"
+# Etter så mange oppgaver i main rydder en agent i notatene i docs/agents (slår sammen, fjerner utdaterte).
+tidy_every = 5
+# Hvor mange runder gjennomgangen kan be om endringer før oppgaven går til eieren.
+review_rounds = 2
 # Nettilgang (WebSearch og WebFetch) for agentene, til dokumentasjon, API-er og pakker. false skrur det av.
 web = true
 

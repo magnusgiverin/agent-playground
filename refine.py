@@ -3,6 +3,7 @@
 
     python3 refine.py              # start løkka: følger boardet til du trykker Ctrl-C
     python3 refine.py --verbose    # skriv også ut hele inndata og svar for hvert verktøykall
+    python3 refine.py --antakelser # agentene antar mer og spør bare om det som er absolutt kritisk
 
 Løkka sjekker boardet selv via Notion API (billig, ingen Claude). Når en oppgave i Innboks
 har «Klar for pipeline» og én Eier, starter den en Claude-økt for den oppgaven
@@ -34,7 +35,7 @@ from refiner.board import Board, InlineWatcher, NETWORK_ERRORS
 from refiner.code import repo
 from refiner.config import AGENT
 from refiner.display import COLOR, SPINNER, dim, paint, say, short, status_line
-from refiner.jobs import adoptable, next_jobs, run_job
+from refiner.jobs import ASSUME, TIDY, adoptable, next_jobs, run_job, run_tidy
 from refiner.sessions import load_state, news_for, save_state
 from refiner import slack as slack_bridge
 
@@ -90,6 +91,8 @@ def watch(verbose, poll):
     pool = ThreadPoolExecutor(max_workers=parallel)
     running = {}  # oppgave-ID → (jobb, tittel)
     say(dim(f"Kjører opptil {parallel} agenter samtidig ([agent] parallel i refiner.toml)."))
+    if ASSUME["on"]:
+        say(paint("Modus: flere antakelser. Agentene spør bare om det som er absolutt kritisk.", "33"))
     frame, checked, snap = 0, "–", {}
     try:
         while True:
@@ -117,6 +120,9 @@ def watch(verbose, poll):
                 jobs, checked = [], paint(f"feil: {short(error, 60)}", "31")
             for job in jobs[:max(0, parallel - len(running))]:
                 id = job[0]
+                if id == TIDY:  # ryddingen hører ikke til noen oppgave
+                    running[id] = (pool.submit(run_tidy, board, verbose), "Rydder i agentnotatene")
+                    continue
                 state.setdefault(id, {"title": snap[id]["title"]})  # bare hovedløkka legger til oppgaver
                 running[id] = (pool.submit(run_job, board, state, job, snap, verbose), snap[id]["title"])
 
@@ -149,7 +155,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--poll", type=float, default=20, metavar="SEKUNDER", help="hvor ofte boardet sjekkes mens den venter (standard 20)")
     parser.add_argument("--verbose", action="store_true", help="skriv også ut hele inndata og svar for hvert verktøykall")
+    parser.add_argument("--antakelser", action="store_true",
+                        help="agentene antar mer og spør bare om det som er absolutt kritisk (sikkerhet, data, noe som ikke kan angres)")
     args = parser.parse_args()
+    ASSUME["on"] = args.antakelser
     try:
         watch(args.verbose, args.poll)
     except KeyboardInterrupt:

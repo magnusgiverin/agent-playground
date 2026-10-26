@@ -28,24 +28,38 @@ DEV_TOOLS = [
 # Ekstra verktøy for raffineringsøkter når skisser er på: skrive skisser i Figma via /sketch-figma
 SKETCH_TOOLS = ["ReadMcpResourceTool", "mcp__claude_ai_Figma__create_session", "mcp__claude_ai_Figma__use_figma",
                 "mcp__claude_ai_Figma__search_design_system", "mcp__claude_ai_Figma__get_screenshot"]
-# Nettet: søk og lesing av sider, for dokumentasjon, API-er og pakker. Begge typer økter får det.
+# Gjennomgang før main: kan lese, kjøre sjekkene og skrive dommen (review.md), men ikke endre koden
+REVIEW_TOOLS = [
+    "Write(.cache/work/*/review.md)",
+    "Bash(npm *)", "Bash(corepack pnpm *)", "Bash(npx tsc*)", "Bash(npx eslint*)", "Bash(npx vitest*)", "Bash(npx jest*)",
+    "Bash(git -C .cache/work/* diff*)", "Bash(git -C .cache/work/* log*)", "Bash(git -C .cache/work/* show*)",
+    "Bash(git -C .cache/work/* status*)", "Bash(ls .cache/work/*)", "Bash(wc *)",
+]
+# Nettet: søk og lesing av sider, for dokumentasjon, API-er og pakker. Alle økter får det.
 WEB_TOOLS = ["WebSearch", "WebFetch"]
 NEVER = ["Agent", "Bash(*.env*)", "Bash(git push*)", "Bash(git * push*)", "Bash(npm publish*)", "Bash(git remote*)", "Bash(git config*)"]
 
 
-def claude_command(prompt, session_flags, develop=False):
-    # dontAsk: bare verktøyene som er tillatt i .claude/settings.json (og DEV_TOOLS) kjører, alt annet avvises
-    model = AGENT.get("dev_model" if develop else "model") or AGENT.get("model", "claude-sonnet-5-5")
+MODES = {  # økttype → (modellinnstilling, innsats, ekstra verktøy)
+    "refine": ("model", "effort", []),
+    "develop": ("dev_model", "effort", DEV_TOOLS),
+    "tidy": ("dev_model", "effort", DEV_TOOLS),        # rydder notater på en egen branch, som en utviklingsoppgave
+    "review": ("review_model", "review_effort", REVIEW_TOOLS),
+}
+
+
+def claude_command(prompt, session_flags, mode="refine"):
+    # dontAsk: bare verktøyene som er tillatt i .claude/settings.json (og verktøyene for modusen) kjører, alt annet avvises
+    model_key, effort_key, extra = MODES[mode]
+    model = AGENT.get(model_key) or AGENT.get("model", "claude-sonnet-5-5")
     cmd = ["claude", "-p", prompt, *session_flags, "--permission-mode", "dontAsk",
-           "--model", model, "--effort", AGENT.get("effort", "medium"),
+           "--model", model, "--effort", AGENT.get(effort_key) or AGENT.get("effort", "medium"),
            "--append-system-prompt", rules_prompt(),
            # underagenter dobler kostnaden, og kodesøk klarer økta selv med Grep og Glob
            "--disallowedTools", *NEVER,
            "--mcp-config", str(HERE / ".mcp.json"), "--output-format", "stream-json", "--verbose"]
-    allowed = list(WEB_TOOLS) if AGENT.get("web", True) else []
-    if develop:
-        allowed += DEV_TOOLS
-    elif CONFIG.get("design", {}).get("sketches", True) and CONFIG.get("design", {}).get("figma"):
+    allowed = (list(WEB_TOOLS) if AGENT.get("web", True) else []) + extra
+    if mode == "refine" and CONFIG.get("design", {}).get("sketches", True) and CONFIG.get("design", {}).get("figma"):
         allowed += SKETCH_TOOLS
     if allowed:
         cmd += ["--allowedTools", *allowed]
@@ -55,13 +69,13 @@ def claude_command(prompt, session_flags, develop=False):
     return cmd
 
 
-def run_claude(prompt, session_flags, verbose=False, develop=False, baseline=0.0):
+def run_claude(prompt, session_flags, verbose=False, mode="refine", baseline=0.0):
     """Kjører én Claude-tur og viser hvert steg.
 
     Claude Code oppgir kostnaden for hele økta (fortsettelser og forker arver tidligere kostnad), så
     kostnaden for akkurat dette kallet er totalen minus det økta hadde kostet før (baseline).
     Returnerer en dict: ok, cost (dette kallet), total (økta så langt), turns, seconds, context (tokens per steg)."""
-    cmd = claude_command(prompt, session_flags, develop)
+    cmd = claude_command(prompt, session_flags, mode)
     run = {"ok": False, "cost": 0.0, "total": baseline, "turns": 0, "seconds": 0.0, "context": 0}
     calls = {}  # tool_use_id -> (kilde, startet)
     proc = subprocess.Popen(cmd, cwd=HERE, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True, bufsize=1)

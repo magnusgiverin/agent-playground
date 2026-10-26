@@ -39,6 +39,7 @@ Filer leser du med Read, lister med Glob og lager eller endrer med Write og Edit
 
 ### 1. Forstå prosjektet
 
+- Les `docs/agents/README.md` og notatene som gjelder det du skal endre (se «Agentnotater» i sources.md). Advarslene der er skrevet av agenter før deg. Følg dem.
 - Les README, CLAUDE.md, AGENTS.md og `package.json` i arbeidskopien. Finn ut hvilken pakkebehandler prosjektet bruker: `pnpm-lock.yaml` betyr `corepack pnpm`, `package-lock.json` betyr `npm`. Finn også hvilke sjekker som finnes (`lint`, `typecheck`, `test`, `build`).
 - Følg stilen i koden rundt: navngiving, mappestruktur, komponentmønstre og hvordan CSS skrives. Gjenbruk det som finnes, i stedet for å lage nytt.
 - Søk med Grep og Glob med `path` satt til arbeidskopien. `.cache/` er gitignored, så søk uten `path` finner ingenting. Les store filer i biter.
@@ -56,6 +57,9 @@ Kjør kommandoene mot arbeidskopien slik «Kommandoer» over viser, for eksempel
 
 ### 4. Hvis du står fast
 
+Står det `Modus: flere antakelser` i meldingen, spør du bare når et feil valg ville vært alvorlig og vanskelig å rette opp (se «Modus: flere antakelser» i definition-of-ready.md). Ellers velger du det mest fornuftige, skriver det i rapporten under «Antakelser», og fortsetter.
+
+
 Er noe uklart som endrer oppførselen, eller umulig slik kontrakten sier:
 
 1. Commit det du har så langt.
@@ -63,13 +67,17 @@ Er noe uklart som endrer oppførselen, eller umulig slik kontrakten sier:
 3. Sett `Blokkeringsnotat` til `Venter på svar under utvikling (se kommentarene)`.
 4. Avslutt. Økta fortsetter når eieren svarer.
 
+### 4b. Skriv notater for de neste
+
+Tok du et designvalg andre bør følge, eller fant du noe kritisk den neste kan gå i, skriver du et notat i `docs/agents/` på branchen din og oppdaterer indeksen, slik «Agentnotater» i sources.md viser. Commit det sammen med koden. Gjennomgangen sjekker at notatene som trengs, er skrevet, og at de stemmer med koden.
+
 ### 5. Sjekk at alt er grønt
 
 Kjør alle sjekkene prosjektet har (lint, typecheck, test, build). Alle skal være grønne før du er ferdig. Klarer du ikke å få en sjekk grønn innen rimelig tid, går du til steg 4.
 
 ### 6. Skriv rapporten (bare når alt er grønt)
 
-`rapport.md` (stien står i meldingen) er signalet om at du er ferdig. Når den finnes, fører refine.py branchen rett inn i main. Skriv den derfor **bare** når alle akseptansekriteriene er oppfylt, alt er committet, og alle sjekkene er grønne. Står du fast, skriver du den ikke. Da spør du i stedet, slik steg 4 sier.
+`rapport.md` (stien står i meldingen) er signalet om at du er ferdig. Når den finnes, går endringen først gjennom en kritisk gjennomgang av en annen agent (/review-change). Blir den godkjent, fører refine.py branchen inn i main. Ber gjennomgangen om endringer, får du funnene i en melding. Fiks dem, commit og skriv rapporten på nytt. Skriv den derfor **bare** når alle akseptansekriteriene er oppfylt, alt er committet, og alle sjekkene er grønne. Står du fast, skriver du den ikke. Da spør du i stedet, slik steg 4 sier.
 
 Rapporten blir kommentaren på oppgaven i Notion og i Slack-tråden. Hold den kort:
 
@@ -86,6 +94,10 @@ Hold headeren fast øverst på menysiden
 **Sjekker:** lint, typecheck, 5 tester og build er grønne.
 
 **Design:** bygget etter den godkjente skissen v2 (eller «Ingen visuell endring»)
+
+**Antakelser:** valg du tok selv underveis (eller «Ingen»)
+
+**Notater:** hvilke notater i docs/agents du har skrevet eller oppdatert (eller «Ingen»)
 
 **Ikke gjort:**
 - Ting du så, men lot være fordi de er utenfor oppgaven (eller «Ingenting»)

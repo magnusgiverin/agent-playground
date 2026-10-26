@@ -17,13 +17,17 @@ from .claude import COMPACT, DEV_COMPACT, run_claude
 from .code import commits_ahead, git, prepare_workdir, push_to_main, rebase_on_main, repo, sync_code, uncommitted, workdir
 from .config import AGENT, HERE
 from .display import dim, paint, say, set_tag, short
-from .sessions import news_for, save_state, session_exists
+from .sessions import load_meta, news_for, save_meta, save_state, session_exists
 
 DEVELOPING = {"Under utvikling"}
 PUBLISH_LOCK = threading.Lock()  # én rebase og push til main om gangen, så to ferdige oppgaver ikke kolliderer
 RUNS = HERE / ".cache" / "runs.jsonl"  # én linje per Claude-kall: hva, hvor lenge, og hva det kostet
 RETRY_AFTER = [60, 300, 900]           # vent 1, 5 og 15 minutter etter en feil før neste forsøk
 COMPACT_AT = int(AGENT.get("compact_at", 60_000))  # komprimer bare økter som faktisk er store (tokens per steg)
+REVIEW_ROUNDS = int(AGENT.get("review_rounds", 2))  # runder gjennomgangen kan be om endringer før eieren må inn
+TIDY_EVERY = int(AGENT.get("tidy_every", 5))        # rydd i agentnotatene etter så mange oppgaver i main
+TIDY = "rydding"                                     # jobb-ID for ryddingen, som ikke hører til noen oppgave
+ASSUME = {"on": False}                               # settes av refine.py --antakelser: spør bare om det absolutt kritiske
 
 
 def session_total(state, session):
@@ -119,6 +123,14 @@ def next_jobs(board, snap, state, busy=()):
         else:
             add(id, "new", None, "ny oppgave i Innboks → starter en ny økt")
 
+    # 4b. Paraplyer der alle delene er Fullført: sett paraplyen til Fullført, uten Claude
+    for id, ticket in snap.items():
+        if (id in taken or ticket["status"] in ("Fullført", None) or not ticket["blocked_by"]
+                or not is_umbrella(id, ticket, state)):
+            continue
+        if all(snap.get(b, {}).get("status", "Fullført") == "Fullført" for b in ticket["blocked_by"]):
+            add(id, "close_umbrella", None, "alle delene er Fullført → paraplyen er ferdig")
+
     # 5a. Oppgaver fra den gamle PR-flyten (Til gjennomgang med en branch): før branchen inn i main, uten Claude
     old = [(id, state[id]["dev"]) for id, ticket in snap.items()
            if ticket["status"] == "Til gjennomgang" and (state.get(id, {}).get("dev") or {}).get("branch")
@@ -136,6 +148,11 @@ def next_jobs(board, snap, state, busy=()):
             continue  # venter på at oppgavene den bygger på, er ført inn i main
         add(id, "develop", None, "Klar → starter utviklingen")
 
+    # 5b. Rydd i agentnotatene når nok oppgaver har gått inn i main siden sist
+    if TIDY not in taken and load_meta().get("merged_since_tidy", 0) >= TIDY_EVERY:
+        taken.add(TIDY)
+        jobs.append((TIDY, "tidy", None, f"{TIDY_EVERY} oppgaver i main siden sist → rydder i agentnotatene"))
+
     # 6. Oppgaver i pipelinen som løkka ikke har en økt for (laget, flyttet eller raffinert uten den): ta dem over
     for id, ticket in snap.items():
         entry = state.get(id, {})
@@ -146,7 +163,7 @@ def next_jobs(board, snap, state, busy=()):
             add(id, "new", None, "står i Raffinering uten agent → tar den over")
         elif ticket["status"] == "Trenger avklaring" and last and last["human"]:
             add(id, "new", None, "ubesvart kommentar i Trenger avklaring → tar den over")
-        elif ticket["status"] == "Under utvikling":
+        elif ticket["status"] == "Under utvikling" and not is_umbrella(id, ticket, state):
             add(id, "develop", None, "står i Under utvikling uten agent → tar den over")
     return jobs
 
@@ -169,6 +186,9 @@ def context(ticket, code, commit, comments):
         f" · Figma-lenke={ticket['figma'] or '(ingen)'} · Blokkert av={len(ticket['blocked_by'])} oppgave(r)"
         f" · Klar for pipeline={yes_no}",
     ]
+    if ASSUME["on"]:
+        lines.append("- Modus: flere antakelser. Spør bare om det som er absolutt kritisk, og anta resten "
+                     "(se «Modus: flere antakelser» i definition-of-ready.md).")
     if comments:
         lines.append("- Kommentarer fra mennesker du ikke har sett ennå:")
         lines += [f"  > {short(text, 1500)}" for _, text in comments]
@@ -184,6 +204,11 @@ def run_job(board, state, job, snap, verbose):
     set_tag(short(ticket["title"], 28))
     if kind == "to_main":
         return finish_old_pr(board, state, id, ticket)
+    if kind == "close_umbrella":
+        board.update(id, {"Status": {"status": {"name": "Fullført"}}, "Blokkeringsnotat": {"rich_text": []}})
+        board.comment(id, "🤖 Alle delene er Fullført, så denne er ferdig.")
+        say(paint(f"«{ticket['title']}»: alle delene er Fullført → Fullført", "32"))
+        return
     develop = kind in ("develop", "dev_feedback", "dev_continue", "dev_conflict")
     if kind in ("answered", "after_klar", "umbrella", "interrupted") and not session_exists(entry.get("session", "")):
         kind, why = "new", why + " (fant ikke økta, starter en ny)"  # økta er borte, start på nytt fra Notion
@@ -275,7 +300,7 @@ def run_job(board, state, job, snap, verbose):
     known = baseline is not None
     say(paint(f"=== {time.strftime('%H:%M:%S')} «{title}»: {why} ===", "1"))
     say(dim(f"Økt …{session[-6:]} · kode {commit}" + (f" · branch {branch} → {base}" if develop else "")))
-    run = run_claude(prompt, flags, verbose, develop, baseline or 0.0)
+    run = run_claude(prompt, flags, verbose, "develop" if develop else "refine", baseline or 0.0)
     ok = run["ok"]
     record(state, entry, session, kind, run, known)
     entry["attempts"] = 0 if ok else entry.get("attempts", 0) + 1
@@ -289,7 +314,7 @@ def run_job(board, state, job, snap, verbose):
         say(paint(f"«{title}» feilet. Prøver igjen om {wait // 60} min.", "33"))
 
     if develop:
-        publish(board, id, entry, ticket, path, base)
+        review_and_publish(board, state, id, entry, ticket, path, branch, base, verbose)
     time.sleep(3)  # gi Notion et øyeblikk på å vise agentens egne endringer
     try:
         now = board.snapshot().get(id, {})
@@ -304,11 +329,99 @@ def run_job(board, state, job, snap, verbose):
         if run["context"] >= COMPACT_AT:
             # komprimer før hvilen: når eieren svarer, sendes da et kort sammendrag i stedet for hele historikken
             say(dim(f"«{title}» venter på svar. Økta er stor (~{run['context'] // 1000}k tokens), så den komprimeres først…"))
-            compact = run_claude(DEV_COMPACT if develop else COMPACT, ["--resume", session], verbose, develop,
+            compact = run_claude(DEV_COMPACT if develop else COMPACT, ["--resume", session], verbose, "develop" if develop else "refine",
                                  session_total(state, session) or 0.0)
             record(state, entry, session, "compact", compact)
         say(dim(f"«{title}» venter på svar fra eieren, og økta hviler til noe skjer. Så langt for oppgaven: ${entry['cost']:.2f}"))
     save_state(state)
+
+
+def review(entry, title, url, path, branch, base, verbose, what="oppgaven"):
+    """En egen gjennomgangsøkt, uten utviklerens kontekst. Returnerer (godkjent, teksten i review.md)."""
+    verdict = path.parent / "review.md"
+    verdict.unlink(missing_ok=True)
+    folder = path.parent.relative_to(HERE)
+    contract = ("" if url.startswith("http") else
+                "Det finnes ingen Notion-oppgave. Kontrakten er reglene i /tidy-notes: bare docs/agents er endret, og notatene "
+                "stemmer med koden.\n")
+    prompt = (f"/review-change {url}\n\nGjennomgå endringen for {what} «{title}» før den føres inn i {base}.\n{contract}"
+              f"- Arbeidskopi: {folder}/repo, branch {branch}. Diffen: `git -C {folder}/repo diff origin/{base}...HEAD`\n"
+              f"- Utviklerens rapport: {folder}/rapport.md\n- Skriv dommen i: {folder}/review.md\n"
+              f"Bruk aldri `cd`. Kjør sjekkene med `npm --prefix {folder}/repo …`.")
+    session = str(uuid.uuid4())
+    say(dim(f"Kritisk gjennomgang før {base} (egen økt …{session[-6:]})…"))
+    run = run_claude(prompt, ["--session-id", session], verbose, "review")
+    record({}, entry, session, "review", run)
+    text = verdict.read_text().strip() if verdict.exists() else ""
+    return text.splitlines()[0].strip().upper() == "GODKJENT" if text else False, text
+
+
+def review_and_publish(board, state, id, entry, ticket, path, branch, base, verbose):
+    """Ingen kode går inn i main uten at en annen agent har godkjent den. Ved funn fikser utviklingsøkta dem."""
+    report = path.parent / "rapport.md"
+    for round in range(REVIEW_ROUNDS + 1):
+        if not report.exists():
+            return  # ikke ferdig, eller venter på svar
+        approved, verdict = review(entry, ticket["title"], ticket["url"], path, branch, base, verbose)
+        if approved:
+            say(paint("Gjennomgangen godkjente endringen.", "32"))
+            entry["dev"]["review"] = verdict
+            publish(board, id, entry, ticket, path, base)
+            return
+        findings = verdict or "Gjennomgangen skrev ingen dom (review.md mangler), så endringen kan ikke godkjennes."
+        if round == REVIEW_ROUNDS:
+            board.update(id, {"Blokkeringsnotat": {"rich_text": [{"text": {"content": "Gjennomgangen fant problemer som ikke ble løst. Se kommentarene."}}]}})
+            board.comment(id, f"🤖 Gjennomgangen før main fant problemer også etter {REVIEW_ROUNDS} runder med rettelser, så jeg "
+                              f"fører det ikke inn i main. Si hva som skal gjøres, eller godta det slik det er.\n\n{short(findings, 1500)}")
+            say(paint(f"«{ticket['title']}»: ikke godkjent etter {REVIEW_ROUNDS} runder. Venter på eieren.", "33"))
+            report.unlink()
+            return
+        say(paint(f"Gjennomgangen ba om endringer (runde {round + 1} av {REVIEW_ROUNDS}). Utviklingsøkta fikser dem.", "33"))
+        board.comment(id, f"🤖 Gjennomgangen før main ba om endringer. Jeg fikser dem.\n\n{short(findings, 1500)}")
+        report.unlink()
+        folder = path.parent.relative_to(HERE)
+        fix = (f"En kritisk gjennomgang av endringen din for «{ticket['title']}» ba om endringer før den kan føres inn i {base}:\n\n"
+               f"{findings}\n\nFiks alt under «Må fikses», commit, kjør alle sjekkene, og skriv {folder}/rapport.md på nytt når "
+               f"alt er grønt. Er du uenig i et funn, forklar hvorfor i rapporten. Bruk aldri `cd`. Kjør git og npm med "
+               f"arbeidskopien som argument ({folder}/repo).")
+        session = entry["dev"]["session"]
+        run = run_claude(fix, ["--resume", session], verbose, "develop", session_total(state, session) or 0.0)
+        record(state, entry, session, "review_fix", run)
+
+
+def run_tidy(board, verbose):
+    """Rydder i docs/agents på en egen branch, og går gjennom samme gjennomgang som en oppgave før main."""
+    set_tag("rydding")
+    meta = load_meta()
+    try:
+        path, branch, base = prepare_workdir(f"{TIDY}-{time.strftime('%Y%m%d%H%M')}", "Rydd i agentnotatene")
+    except RuntimeError as error:
+        say(paint(f"Git feilet: {error}", "31"))
+        return
+    folder = path.parent.relative_to(HERE)
+    say(paint(f"=== {time.strftime('%H:%M:%S')} Rydder i agentnotatene (branch {branch}) ===", "1"))
+    entry = {"title": "Rydd i agentnotatene", "dev": {"branch": branch}}
+    prompt = (f"/tidy-notes\n\nArbeidskopi: {folder}/repo, branch {branch}. Skriv rapporten i {folder}/rapport.md. "
+              f"Bruk aldri `cd`. Kjør git med `git -C {folder}/repo …`.")
+    session = str(uuid.uuid4())
+    run = run_claude(prompt, ["--session-id", session], verbose, "tidy")
+    record({}, entry, session, "tidy", run)
+    meta["merged_since_tidy"] = 0  # også om det var ingenting å rydde: neste sjekk om TIDY_EVERY nye
+    save_meta(meta)
+    report = path.parent / "rapport.md"
+    if not report.exists() or not commits_ahead(path, base):
+        say(dim("Ingenting å rydde i agentnotatene."))
+        return
+    approved, verdict = review(entry, "Rydd i agentnotatene", "(ingen Notion-oppgave)", path, branch, base, verbose, "ryddingen")
+    if not approved:
+        say(paint(f"Ryddingen ble ikke godkjent, så den føres ikke inn i {base}:\n{short(verdict, 400)}", "33"))
+        return
+    with PUBLISH_LOCK:
+        if rebase_on_main(path, base):
+            sha = push_to_main(path, base)
+            say(paint(f"Agentnotatene er ryddet og ført inn i {base}: {repo()[0]}/commit/{sha}", "32"))
+        else:
+            say(paint("Ryddingen fikk konflikt med main. Den prøves igjen neste gang.", "33"))
 
 
 def finish_old_pr(board, state, id, ticket):
@@ -355,6 +468,9 @@ def _publish(board, id, entry, ticket, path, base):
         summary = report.read_text().strip()
         report.unlink()  # neste runde må melde ferdig på nytt
         entry["dev"].update(pushed=commit_url, conflict=False)
+        meta = load_meta()
+        meta["merged_since_tidy"] = meta.get("merged_since_tidy", 0) + 1
+        save_meta(meta)
         board.update(id, {"Status": {"status": {"name": "Fullført"}}, "Pull request": {"url": commit_url},
                           "Blokkeringsnotat": {"rich_text": []}})
         board.comment(id, f"🤖 Branchen {entry['dev'].get('branch', '')} er ført inn i {base}: {commit_url}\n\n{short(summary, 1500)}")
