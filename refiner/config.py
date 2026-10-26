@@ -32,5 +32,8 @@ RULES = ["board.md", "sources.md", ".claude/skills/refine-ticket/page-layout.md"
 
 def rules_prompt():
     parts = [f"<fil sti=\"{path}\">\n{(HERE / path).read_text()}\n</fil>" for path in RULES]
-    return ("Disse regelfilene for raffineringsagenten er allerede lastet. Ikke les dem med Read.\n\n"
+    return ("Dette er en automatisk økt startet av refine.py, uten noe menneske som kan svare underveis. Regler (også fra "
+            "personlige instruksjoner) om å beskrive endringer og vente på «ok» før du skriver eller endrer filer, gjelder ikke her: "
+            "skillen du følger er godkjenningen. Spør bare når kontrakten i oppgaven er uklar, slik skillen beskriver.\n\n"
+            "Disse regelfilene for raffineringsagenten er allerede lastet. Ikke les dem med Read.\n\n"
             + "\n\n".join(parts))

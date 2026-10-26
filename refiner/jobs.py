@@ -27,6 +27,7 @@ PR_MODE = MERGE["mode"] == "pr"
 DEVELOPING = {"Under utvikling", "Til gjennomgang"} if PR_MODE else {"Under utvikling"}  # kommentarer her går til utviklingsøkta
 PUBLISH_LOCK = threading.Lock()  # én rebase og push til main om gangen, så to ferdige oppgaver ikke kolliderer
 RUNS = HERE / ".cache" / "runs.jsonl"  # én linje per Claude-kall: hva, hvor lenge, og hva det kostet
+IDLE_LIMIT = 2  # så mange gjenopptakelser på rad uten noe resultat, før oppgaven settes på vent
 RETRY_AFTER = [60, 300, 900]           # vent 1, 5 og 15 minutter etter en feil før neste forsøk
 COMPACT_AT = int(AGENT.get("compact_at", 60_000))  # komprimer bare økter som faktisk er store (tokens per steg)
 REVIEW_ROUNDS = int(AGENT.get("review_rounds", 2))  # runder gjennomgangen kan be om endringer før eieren må inn
@@ -328,6 +329,8 @@ def run_job(board, state, job, snap, verbose):
     known = baseline is not None
     say(paint(f"=== {time.strftime('%H:%M:%S')} «{title}»: {why} ===", "1"))
     say(dim(f"Økt …{session[-6:]} · kode {commit}" + (f" · branch {branch} → {base}" if develop else "")))
+    if develop:  # til sjekken av om kjøringen førte til noe
+        head_before, dirty_before, pr_before = git("-C", str(path), "rev-parse", "HEAD"), uncommitted(path), entry["dev"].get("pr")
     run = run_claude(prompt, flags, verbose, "develop" if develop else "refine", baseline or 0.0)
     ok = run["ok"]
     record(state, entry, session, kind, run, known)
@@ -364,6 +367,11 @@ def run_job(board, state, job, snap, verbose):
             and not dev.get("review_findings")):
         board.update(id, {"Status": {"status": {"name": "Til gjennomgang"}}})  # ingen ny kode å levere: tilbake til PR-en
         status = "Til gjennomgang"
+    if develop and ok:
+        idle = (git("-C", str(path), "rev-parse", "HEAD") == head_before and uncommitted(path) == dirty_before
+                and status == "Under utvikling" and not now.get("blocker") and dev.get("pr") == pr_before
+                and not dev.get("review_findings") and not dev.get("feedback") and not dev.get("conflict"))
+        stop_if_idle(board, id, ticket, dev, idle)
     if status == "Klar" and not develop:
         say(paint(f"«{title}» er Klar. Utviklingen starter av seg selv. Så langt: ${entry['cost']:.2f}", "32"))
     elif status == "Til gjennomgang":
@@ -525,6 +533,21 @@ def _publish(board, id, entry, ticket, path, base):
     except (RuntimeError, *NETWORK_ERRORS) as error:
         say(paint(f"Klarte ikke å pushe «{ticket['title']}»: {short(error, 200)}", "31"))
         board.comment(id, f"🤖 Koden er committet på branchen {entry['dev'].get('branch', '')}, men jeg fikk ikke levert den videre: {short(error, 300)}")
+
+
+def stop_if_idle(board, id, ticket, dev, idle):
+    """Utviklingsøkta ble kjørt, men det ble hverken commit, rapport eller spørsmål. Skjer det IDLE_LIMIT ganger på rad,
+    settes oppgaven på vent (blokkeringsnotat), så den ikke gjenopptas i det uendelige. En kommentar fra et menneske tar den opp igjen.
+    Returnerer om den ble stoppet."""
+    dev["idle_runs"] = dev.get("idle_runs", 0) + 1 if idle else 0
+    if dev["idle_runs"] < IDLE_LIMIT:
+        return False
+    dev["idle_runs"] = 0
+    board.update(id, {"Blokkeringsnotat": {"rich_text": [{"text": {"content": "Venter på at et menneske ser på oppgaven: utviklingsøkta gjorde ingenting"}}]}})
+    board.comment(id, f"🤖 Utviklingsøkta ble gjenopptatt {IDLE_LIMIT} ganger på rad uten å gjøre noe: ingen commits, ingen rapport og ingen spørsmål. "
+                      "Jeg stopper her i stedet for å prøve igjen. Kommenter på oppgaven (for eksempel hva som hindrer den), så fortsetter jeg.")
+    say(paint(f"«{ticket['title']}»: utviklingsøkta gjorde ingenting {IDLE_LIMIT} ganger på rad. Satt på vent til noen kommenterer.", "33"))
+    return True
 
 
 def review_round(board, state, id, entry, ticket, path, base, verbose):

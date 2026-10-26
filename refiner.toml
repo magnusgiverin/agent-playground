@@ -23,12 +23,12 @@ web = true
 
 [notion]
 # Notion-siden som har oppgaveboardet
-board = "https://app.notion.com/p/4006bd3085418018ae5ad454d93b7159"
+board = "https://app.notion.com/p/4026bd3085418010bf58dd82711fbfd3"
 
 [code]
 # Produktets kode. /sync-code holder en skrivebeskyttet kopi av repoet oppdatert i
 # .cache/code med din egen git-innlogging, så det trengs ingen GitHub-nøkkel eller MCP-server.
-github = "https://github.com/magnusgiverin/agentic-development-test"
+github = "https://github.com/aiman01nad/agentic-parkering-test"
 branch = "main"
 # Eller les en lokal mappe i stedet (kommenter ut github over):
 # local = "../hellas-grill"
@@ -37,7 +37,7 @@ branch = "main"
 # Produktets hovedfil eller -side i Figma. Lenker i oppgavene går først. Har en oppgave
 # ingen lenke, blar agenten i denne fila etter frames som passer. Leses via claude.ai-
 # koblingen til Figma.
-figma = "https://www.figma.com/design/LC06usO0N9ckIfvwk3V7xc/Agentic-Figma-test"
+figma = "https://www.figma.com/design/ykSPX12OvIghV4Sbg4OHTX/10-Parkering-%E2%80%93-Design--Copy-?node-id=1-4&m=dev"
 # Ved visuelle endringer tegner agenten en skisse på siden «🤖 Skisser» i fila over, og eieren må
 # godkjenne den før oppgaven blir Klar. Krever at Figma-kontoen din kan redigere fila.
 sketches = true
@@ -77,5 +77,5 @@ manual_tags = ["security", "infrastructure"]     # etiketter på oppgaven som al
 # Finn ID-en nederst i kanalens detaljer i Slack, og inviter boten: /invite @Raffineringsagent
 # Bare for testing: alle oppgaver fra /new får denne Notion-brukeren som Eier, uansett hvem
 # som skriver kommandoen. Tøm den (test_owner = "") for å finne eieren ut fra e-post i stedet.
-test_owner = "3acd872b-594c-8185-9655-0002880a6432"  # magnus.giverin@bekk.no
+test_owner = "3acd872b-594c-81bf-85f2-000238b09feb"  # aiman.nadeem@bekk.no
 channel = "C0CBAJUQFGR"
